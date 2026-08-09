@@ -1,0 +1,13 @@
+{
+  "version": "ver 0.01",
+  "window_width": 1280,
+  "window_height": 800,
+  "sample_rate": 44100,
+  "block_size": 2048,
+  "channels": 2,
+  "analysis_sample_rate": 22050,
+  "analysis_hop": 512,
+  "cache_path": "cache/analysis_cache.json",
+  "user_config_path": "config/user_config.json",
+  "default_theme": "dark"
+}

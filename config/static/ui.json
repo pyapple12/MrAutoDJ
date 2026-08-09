@@ -1,0 +1,12 @@
+{
+  "colors": {
+    "background": "#0d0d0d",
+    "accent": "#00ff41",
+    "deck_a": "#00cccc",
+    "deck_b": "#cccc00",
+    "warning": "#ffcc00",
+    "danger": "#ff4444"
+  },
+  "table_headers": ["状态", "曲名", "BPM", "调性", "能量"],
+  "quota_warn_percent": 80
+}

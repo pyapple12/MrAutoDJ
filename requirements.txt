@@ -1,0 +1,13 @@
+# MrAutoDJ 依赖（M1 起步草案，按 z.plan.md 技术栈逐步启用）
+# GUI
+PySide6>=6.6.0
+# 音频输出（低延迟实时回调）
+python-sounddevice>=0.4.6
+# 音频数组
+numpy>=1.26.0
+scipy>=1.11.0
+# 音频解码与读写
+soundfile>=0.12.1
+pydub>=0.25.1
+# 分析（BPM/调性/能量）
+librosa>=0.10.0
