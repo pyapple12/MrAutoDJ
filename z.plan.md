@@ -121,6 +121,42 @@
 
 ---
 
+## 聚焦清单（Python 优先）
+
+### M1 引擎（核心参考）
+
+| 项目                   | Stars | 价值                               |
+| ---------------------- | ----- | ---------------------------------- |
+| songs-automixer_python | 1★    | TUI DJ 台，与 M1 几乎同构          |
+| pyCrossfade            | 144★  | 全自动混音引擎：渐变变速 + EQ 过渡 |
+
+### M2 AI 自动 DJ
+
+| 项目                | Stars | 价值                     |
+| ------------------- | ----- | ------------------------ |
+| ai-remixmate        | 18★   | 人声分离转场 + LUFS 母带 |
+| automix             | 1★    | 人声感知转场、Set 规划   |
+| dj-track-similarity | 3★    | embedding 相似度选曲     |
+| cuekey              | 2★    | Camelot/BPM/能量分析     |
+
+### M3 Claude 电台
+
+| 项目        | Stars | 价值                               |
+| ----------- | ----- | ---------------------------------- |
+| writ-fm     | 379★  | Python 电台蓝图：Claude 报幕 + TTS |
+| Claudio     | 46★   | 歌单 + 口播 + TTS，交互设计参考    |
+| radio-dj    | 48★   | LLM 导演架构可移植                 |
+| WrzDJ       | 9★    | Python 点歌台                      |
+| mixx-dj-mcp | 2★    | MCP 控制 DJ（40+ 工具）            |
+
+### 取舍
+
+1. M1 深读 songs-automixer_python
+2. M2 看 pyCrossfade 渐变 + ai-remixmate 转场
+3. M3 看 radio-dj 架构 + mixx-dj-mcp 控制层
+
+---
+
 # MrAutoDJ 开发计划
 
 ## 项目定位
@@ -173,39 +209,3 @@ MrAutoDJ：从虚拟 DJ 台起步，逐步演进为 AI 自动 DJ 与 LLM 电台�
 ## 参考项目（来自上文调研）
 
 Mixxx（架构参照）、pyCrossfade、ai-remixmate、radio-dj、WrzDJ（点歌台）、mixx-dj-mcp（LLM 控制 Mixxx 思路）
-
----
-
-## 聚焦清单（Python 优先 · 内容丰富 · 资源有限）
-
-### M1 虚拟 DJ 台引擎（核心参考）
-
-| 项目                              | Stars | 价值                                                                                            |
-| --------------------------------- | ----- | ----------------------------------------------------------------------------------------------- |
-| LaRambla20/songs-automixer_python | 1★    | 与 M1 目标几乎同构：Python/Textual TUI DJ 台，节拍匹配渐变、变速同步、主 FX、backspin、耳机预听 |
-| oguzhan-yilmaz/pyCrossfade        | 144★  | 全自动混音引擎：逐小节渐变变速 + EQ 过渡算法可借鉴；同时覆盖 M2 需求                            |
-
-### M2 AI 自动 DJ
-
-| 项目                           | Stars | 价值                                               |
-| ------------------------------ | ----- | -------------------------------------------------- |
-| Chunduri-Aditya/ai-remixmate   | 18★   | Demucs 人声分离、动态 EQ 转场、LUFS 母带，技术最全 |
-| clawd139/automix               | 1★    | AI DJ 引擎：人声感知转场、智能 Set 规划            |
-| MeteorBurn/dj-track-similarity | 3★    | 音频 embedding 相似度选曲（AI 选歌关键）           |
-| Supercarlillos/cuekey          | 2★    | Camelot 调性/BPM/能量分析 + 软件集成               |
-
-### M3 Claude 电台
-
-| 项目                   | Stars | 价值                                                                                                                                 |
-| ---------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| keltokhy/writ-fm       | 379★  | 24/7 AI 网络电台：Claude 写 DJ 报幕稿 + Chatterbox TTS 播报，Python，M3 首选蓝图                                                     |
-| hllqkb/Claudio         | 46★   | 私人 AI 音乐电台：Claude 生成歌单 + DJ 口播词 + Fish Audio TTS，集成网易云音乐、自然语言点歌、音频可视化，交互设计参考（TypeScript） |
-| johncrash64/radio-dj   | 48★   | Go 但架构可移植：LLM 报幕 + 自动接歌 + Icecast 推流，M3 蓝图                                                                         |
-| wrzonance/WrzDJ        | 9★    | Python 点歌台：Web 仪表盘 + 点歌 + 自动曲目检测                                                                                      |
-| sandraschi/mixx-dj-mcp | 2★    | Python，MCP 让 LLM 控制 DJ 软件（40+ 工具），M3 控制层思路                                                                           |
-
-### 资源有限下的取舍
-
-1. 深度读 1 个引擎：songs-automixer_python（小而全，直接对应 M1 清单）
-2. M2 研究 pyCrossfade 渐变算法 + ai-remixmate 转场设计
-3. M3 看 radio-dj 架构（README 即可）+ mixx-dj-mcp 控制层写法

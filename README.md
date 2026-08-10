@@ -115,10 +115,24 @@ MrAutoDJ/
 │   ├── retry.py               # 泛型重试函数（指数退避）
 │   └── convert.py             # 弹性类型转换（宽容解析）
 ├── reference/                 # 参考仓库（外部 clone，不纳入版本控制）
+├── tools/rubberband/          # 内置变速引擎（GPL 便携构建，兜底方案，随仓库分发）
 ├── requirements.txt           # Python 依赖列表
 ├── LICENSE                    # MIT 许可证
 └── README.md                  # 本文件
 ```
+
+## 变速引擎（rubberband）
+
+Pitch 变速与 Keylock（变调不变速）依赖 Rubber Band 变速引擎。解析优先级：
+
+1. `RUBBERBAND_BIN` 环境变量（显式指定）
+2. 系统 PATH 中的 `rubberband`（**推荐**：优先使用你电脑上安装的版本）
+3. 项目内置 `tools/rubberband/rubberband.exe`（兜底：换电脑/未安装也可用）
+
+> **授权说明**：项目内置的 `tools/rubberband/` 为 **GPL-2.0+** 许可的第三方独立程序
+> （Chris Cannam / Particular Programs Ltd 发布，全文见 `tools/rubberband/COPYING.txt`）。
+> MrAutoDJ（MIT）仅以外部进程方式调用它，不链接、不修改其代码；
+> 若需闭源分发请从 breakfastquay.com 获取商业许可。
 
 ## 配置参数
 
@@ -164,7 +178,7 @@ A：Windows 原生运行（WSL 下 sounddevice 无设备）。检查默认输出
 
 ### Q2：变速（Pitch）功能需要什么？
 
-A：M1 采用预渲染方案，变速渲染依赖 rubberband CLI（`choco install rubberband` 或从 breakfastquay.com 下载加入 PATH）；未安装时 Pitch 功能降级为不可用，播放不受影响。
+A：M1 采用预渲染方案，变速渲染依赖 rubberband 引擎。解析顺序：`RUBBERBAND_BIN` 环境变量 → 系统 PATH 安装的 rubberband → 项目内置 `tools/rubberband/`（已随仓库分发，换电脑零配置）。完全未找到时变速/Keylock 降级为不可用，播放不受影响。
 
 ### Q3：分析很慢？
 

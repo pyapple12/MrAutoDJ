@@ -45,7 +45,7 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 ### 函数注释规则
 
 - 每个函数定义下方紧跟 `#` 注释，说明该函数的用途和核心逻辑（1-3 行）
-- **禁止使用 docstring（三引号字符串）替代 `#` 注释**——函数/类/模块文档统一走 `#` 注释体系
+- **禁止使用 docstring（三引号字符串）替代 `#` 注释**——函数/类/模块文档统一走 `#` 注释体系，docstring 不承担注释职责；单行 docstring 当注释用属于违规
 - 每个 `.py` 文件末尾必须有完整的函数逻辑说明区，用 `# =====` 分隔，涵盖文件中所有函数/模块级常量：
   - 输入、输出、逻辑步骤
   - 设计理由（为什么这样做）
@@ -56,7 +56,7 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 
 - 注释必须用 `#`，禁止 `//` 或其他语言注释符号；所有注释使用中文
 - 命名风格：函数/变量用 `snake_case`，类用 `CamelCase`，常量用 `UPPER_CASE`
-- `_` 前缀：函数名前加 `_` 表示模块内部私用
+- `_` 前缀：函数名前加 `_` 表示模块内部私用，如 `_format_tokens()`，外部模块不应直接调用
 - `def main()`：每个可独立运行的脚本都有 `main()` + `if __name__ == "__main__": main()`
 - 类型注解：优先使用 Python 类型注解，包括 `typing` 模块和 `| None` 语法
 - dataclass：配置聚合优先用 `@dataclass`
@@ -65,16 +65,17 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 - 推导式：优先用列表/字典推导式而非手写 for 循环构建集合
 - 布尔值判断：用 `if x:` / `if not x:` 而非 `if x == True:` / `if x is False:`
 - 空值判断：用 `if x is None:` / `if x is not None:` 而非 `if x == None:`
-- 异常捕获：避免裸 `except:`，至少用 `except Exception:`，指定具体异常类型更好
+- 异常捕获：避免裸 `except:`，至少用 `except Exception:`，指定具体异常类型更好；捕获多个异常类型可用 `except (Exc1, Exc2):`
 - 行长度：每行尽量不超过 100 字符（超过时在运算符或逗号后换行）
-- 字符串引号：普通字符串用双引号；f-string 内含大量双引号时允许外层使用单引号
+- 空格约定：逗号后加空格、冒号前不加空格（切片冒号两侧不加）、赋值/比较运算符两侧加空格、函数定义前后各空两行、类定义前后各空两行、方法之间空一行
+- 字符串引号：普通字符串用双引号，文档字符串用 `"""` 三引号；f-string 内含大量双引号时允许外层使用单引号
 - 路径处理：强制使用 `pathlib` 代替 `os.path`
 - 临时文件：所有临时生成的脚本/文件必须写入项目根目录下的 `.temp/` 文件夹（已 gitignore）
 - 音频数组约定：引擎统一 `(N, 2) float32 [-1, 1] @ 44100Hz`；分析用独立 22050Hz mono 路径
 
 ## Git 注意
 
-- `.gitignore` 忽略 `.venv`、`reference/`、`archived/`、`.temp/`、`.opencode/`、`opencode-go.json`、`config/user_config.json`、`cache/` —— 对这些文件的修改不会出现在 `git status` 中；`AGENTS.md` 已纳入版本控制
+- `.gitignore` 忽略 `.venv`、`reference/`、`archived/`、`.temp/`、`.opencode/`、`opencode-go.json`（含配额凭据）、`config/user_config.json`、`cache/` —— 对这些文件的修改不会出现在 `git status` 中；`AGENTS.md` 已纳入版本控制
 - 严禁将 API key、authCookie、workspaceId 等凭据提交到仓库
 
 ## 操作注意

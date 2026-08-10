@@ -7,7 +7,7 @@
   "channels": 2,
   "analysis_sample_rate": 22050,
   "analysis_hop": 512,
-  "cache_path": "cache/analysis_cache.json",
+  "cache_path": "cache/analysis.sqlite",
   "user_config_path": "config/user_config.json",
   "default_theme": "dark"
 }
