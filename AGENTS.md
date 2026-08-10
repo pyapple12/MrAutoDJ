@@ -23,9 +23,9 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
   - **用户配置**（`config/settings.py`，可读写）：AppConfig dataclass，存项目内 `config/user_config.json`（路径由 base.json `user_config_path` 指定）
 - **参数约定**：可调参数一律走 `config/static/*.json`，禁止代码硬编码；版本号唯一来源为 `base.json` 的 `version` 字段
 - `main.py` 收编 GUI 分发；模块间顶层 import，不要使用函数内延迟 import（librosa 等重依赖除外，可在函数内导入）
-- 提交信息用中文 conventional 风格并带版本号，如 `feat: V0.1，完成音频引擎...`
+- 提交信息按 Git 注意章节的 Commit 提交规范（V2）书写，如 `feat: V0.09，UI 改版与维护...`
 - 项目规划与方案文档在 `z.plan.md`，源码研读报告在 `w.study.md`，任务清单在 `x.progress.md`
-- `reference/` 目录是外部项目的 git clone（浅克隆），**不纳入本仓库版本控制**；需要更新时重新 clone
+- `.reference/` 目录是外部项目的 git clone（浅克隆），**不纳入本仓库版本控制**；需要更新时重新 clone
 
 ## 代码规范
 
@@ -55,6 +55,7 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 ### 代码约定
 
 - 注释必须用 `#`，禁止 `//` 或其他语言注释符号；所有注释使用中文
+- **正式程序文件（main.py 及 modules/、ui/、utils/、config/ 下的 .py）的注释中禁止出现任何与 `.reference/` 相关的参考标注**（如"参考：.reference/…"、"照抄自…"等）；参考来源信息只允许写在 `.temp/` 临时脚本或文档（w.study.md / x.progress.md）中
 - 命名风格：函数/变量用 `snake_case`，类用 `CamelCase`，常量用 `UPPER_CASE`
 - `_` 前缀：函数名前加 `_` 表示模块内部私用，如 `_format_tokens()`，外部模块不应直接调用
 - `def main()`：每个可独立运行的脚本都有 `main()` + `if __name__ == "__main__": main()`
@@ -75,8 +76,20 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 
 ## Git 注意
 
-- `.gitignore` 忽略 `.venv`、`reference/`、`archived/`、`.temp/`、`.opencode/`、`opencode-go.json`（含配额凭据）、`config/user_config.json`、`cache/` —— 对这些文件的修改不会出现在 `git status` 中；`AGENTS.md` 已纳入版本控制
+- `.gitignore` 忽略 `.venv`、`.reference/`、`archived/`、`.temp/`、`.opencode/`、`opencode-go.json`（含配额凭据）、`config/user_config.json`、`cache/` —— 对这些文件的修改不会出现在 `git status` 中；`AGENTS.md` 已纳入版本控制
 - 严禁将 API key、authCookie、workspaceId 等凭据提交到仓库
+- 未经用户明确要求，不得擅自执行 `git add`、`git commit` 或任何其他 Git 写操作
+
+### Commit 提交规范（V2，2026-08-10 定稿）
+
+- **标题行**：`<type>: V<版本>，<摘要>`——版本号与 base.json `version` 字段一致；摘要一句话概括核心（可用括号列重点）
+- **type 全集**（conventional 风格）：
+  - `feat` 新功能 / `fix` 修复 / `refactor` 重构（行为不变）/ `perf` 性能
+  - `docs` 文档 / `test` 测试 / `style` 格式 / `build` 构建依赖 / `ci` CI / `chore` 杂项 / `revert` 回滚
+- **正文**（改动大时可选）：`- ` 列表，每个功能块一行自然中文描述，每行 ≤ 100 字符
+- **禁止项**：内部编号（P2/S8/D1 等规划编号）、验证/回归数字（如"全量回归 506 项通过"）、英文混排描述
+- **提交范围**：一个版本的所有连带改动一次提交（源码 + 配置 + 文档同步）
+- **流程**：由 AI 根据 `git status`/`git diff` 核对清单并草拟 commit 内容（git add 清单 + message）→ 用户审阅后自行执行 `git add`/`git commit`/`git push`（AI 不执行 git 写操作）
 
 ## 操作注意
 

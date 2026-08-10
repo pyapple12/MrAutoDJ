@@ -189,22 +189,48 @@ MrAutoDJ：从虚拟 DJ 台起步，逐步演进为 AI 自动 DJ 与 LLM 电台�
 
 ## 里程碑
 
-- [ ] M1 第一步：虚拟 DJ 台
-  - [ ] 双打碟机（播放/暂停/CUE/循环）
-  - [ ] 波形显示（离线分析+实时滚动）
-  - [ ] 三频 EQ + 横推（Crossfader）
-  - [ ] Pitch 变速 + Keylock 变调不变速
-  - [ ] 自动 BPM 检测
-  - [ ] 双输出声卡（监听）
-- [ ] M2 第二步：AI 自动 DJ
-  - [ ] 调和混音（Camelot 轮盘）选曲
-  - [ ] 节拍对齐自动转场（EQ 渐变）
-  - [ ] 自动 Set 规划/能量曲线
-- [ ] M3 第三步：Claude 电台
-  - [ ] 引擎暴露控制接口（HTTP/MCP）
-  - [ ] Claude API 工具调用（选歌/接歌/报幕）
-  - [ ] 点歌互动（直播间消息入口）
-  - [ ] TTS 语音报幕
+- [x] **M1 第一步：虚拟 DJ 台**（V0.1，2026-08 完成，任务明细见 x.progress.md D0-D5）
+  - [x] 曲库与分析：扫描、BPM/调性/能量/CUE 检测、SQLite 版本化缓存、进程池批处理、CLI
+  - [x] 双打碟机：状态机、样本级定时切歌、循环、CUE、三频 EQ、常量功率横推、音量
+  - [x] Pitch 变速（rubberband 预渲染）+ Keylock 变调不变速；双输出耳机监听
+  - [x] 变速转场编排：SKIP/STRETCH 判定、epoch 防陈旧、参数失效重渲染
+  - [x] 波形显示（离线峰值缓存 + 播放头滚动）、深色主题（ui.json 驱动）
+  - [x] UI 集成：曲库表格/双盘控件/混音台/Prepare/Mix、跨线程信号回填
+  - [x] 集成验证：无头引擎探针、端到端脚本、GUI 无头初始化、冒烟
+- [ ] **M1.5 FLX4 交互复刻**（V0.2，依据 w.study.md B13 报告）
+  > 定位：在 M1 基础上按 FLX4 面板一比一补全交互与功能（保留 M1 的曲库/分析/变速转场能力，叠加 FLX4 操作体系）
+  - [ ] **引擎支撑层**
+    - [ ] Hot Cue 槽位：每盘 8 个（存/跳/删/预听 + 灯态查询）
+    - [ ] Beatgrid 跳转：Beat Jump（±1/2/4/8 拍）与 Skip 模式（Vinyl 关时）
+    - [ ] Key Shift 半音：±12 半音 + 复位（Keylock 预渲染管线扩展）
+    - [ ] Jog 引擎接口：搓碟（scratch 位置偏移）/ 弯音（Pitch Bend）/ 触摸检测 / SHIFT 高速搜索
+    - [ ] VU 电平采集（方案 C）：回调内峰值写入预分配数组（零运行时分配），UI 定时器读取
+    - [ ] Slip 模式：隐藏播放头（Slip 期间曲目暗中前进，结束后落回）
+    - [ ] Sampler 槽位：每盘采样载入/播放/停止/卸载
+    - [ ] 效果库扩展：Echo / Delay（延迟线）+ 既有 HPF/LPF/Trans，可组合链
+    - [ ] Fader Start / Tap BPM / Censor / Stutter 支撑
+  - [ ] **UI 交互层**
+    - [ ] 全局 SHIFT 组合键体系（键盘 SHIFT + 点击 = 第二功能，全控件）
+    - [ ] Pad 打击垫组件（1×8 网格 + 模式切换：Hot Cue / Beat Loop / Beat Jump / Sampler / Key Shift）
+    - [ ] Jog 转盘控件（**交互：外圈滚轮=弯音、顶面按住拖动=搓碟**、触摸检测、SHIFT+转=高速搜索、Vinyl 模式开关）
+    - [ ] Beat FX 面板（通道选择 + 效果库 + 拍数 ± + BPM Auto/Tap + LEVEL/DEPTH）
+    - [ ] Mixer 补全：TRIM 预增益、VU 电平指示、Fader Start、Tap BPM
+    - [ ] Instant Doubles（LOAD 双按 = 复制曲目到另一盘同位置播放）
+    - [ ] LED 灯态体系（按钮高亮/灯阵反映引擎状态，如 Hot Cue、Key Shift 灯阵）
+    - [ ] 表演功能：Slip / Censor / Stutter（按键触发）
+  - [ ] **UI 四区布局重排**（Browse + 双 Deck + Mixer + Effects，按 FLX4 面板；核心功能完成后执行）
+  - [ ] 集成验证：无头探针 + 端到端 + 冒烟；提交 `feat: V0.2`
+- [ ] **M2 第二步：AI 自动 DJ**
+  - [ ] 兼容性评分：BPM 倍频归一化 / Camelot 档位 / 能量曲线 / 音色 / 人声冲突
+  - [ ] 调和混音（Camelot 轮盘）选曲与 Set 规划（同艺人约束/去重/能量弧线）
+  - [ ] 节拍对齐自动转场：prepare/mix 管线接入 AI 调度（EQ 渐变 + 下拍触发）
+  - [ ] 自动 Set 规划：贪心编排 + 能量曲线 + 可解释评分（explanation/warnings）
+- [ ] **M3 第三步：Claude 电台**
+  - [ ] 引擎暴露控制接口（HTTP/MCP，portmanteau 工具模式）
+  - [ ] 混合播放队列（song/tts/silence 顺序播放）
+  - [ ] Claude API 工具调用（选歌/接歌/报幕，确定性回退绝不静默）
+  - [ ] 点歌互动（状态机 NEW→ACCEPTED→PLAYING→PLAYED）
+  - [ ] TTS 语音报幕（多引擎可插拔 + 去 emoji）
 
 ## 参考项目（来自上文调研）
 

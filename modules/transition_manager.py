@@ -99,10 +99,11 @@ class TransitionManager:
         cue_seconds: float = 0.0,
         fade_seconds: float = DEFAULT_FADE_SECONDS,
         restore_seconds: float = DEFAULT_RESTORE_SECONDS,
+        key_shift: int = 0,
         on_done: Optional[Callable] = None,
     ) -> bool:
-        # 预备来曲：判定 SKIP/STRETCH → 后台线程解码+渲染 → 完成后校验 epoch 安装。
-        # on_done(plan, error)：成功 plan 非 None；失败 error 非 None（调用方保证线程安全）
+        # 预备来曲：判定 SKIP/STRETCH → 后台线程解码+渲染（key_shift≠0 时再变调）
+        # → 完成后校验 epoch 安装。on_done(plan, error)：成功 plan 非 None；失败 error 非 None
         with self._lock:
             # 守卫：当前盘必须在播且已知 BPM（无 BPM 无法判定拉伸速率）
             if now_deck.state != State.PLAYING or now_bpm <= 0:
@@ -120,9 +121,10 @@ class TransitionManager:
             self._cue_sample = int(cue_seconds * SAMPLE_RATE)
             self._fade_seconds = fade_seconds
             self._restore_seconds = restore_seconds
+            self._key_shift = max(-12, min(12, int(key_shift)))
 
         def _work() -> None:
-            # 后台线程：解码 → 切 CUE → SKIP 原始缓冲 / STRETCH 变速渲染
+            # 后台线程：解码 → 切 CUE → SKIP 原始缓冲 / STRETCH 变速渲染 → Key Shift 变调
             try:
                 audio = self._engine.load_audio(next_path)
                 cue_audio = audio[self._cue_sample :]
@@ -135,6 +137,13 @@ class TransitionManager:
                         self._fade_seconds,
                         self._restore_seconds,
                         sample_rate=SAMPLE_RATE,
+                    )
+                # Key Shift：变速后按半音变调（Keylock 管线扩展）
+                if self._key_shift != 0:
+                    from modules.stretcher import make_keylock_buffer
+
+                    buf = make_keylock_buffer(
+                        buf, float(self._key_shift), sample_rate=SAMPLE_RATE
                     )
                 with self._lock:
                     if self._prep_epoch != my_epoch:

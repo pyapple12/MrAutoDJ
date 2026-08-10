@@ -1,6 +1,5 @@
 # 曲目分析模块：BPM/调性/能量/CUE 检测 + SQLite 缓存 + 进程池批处理 + CLI
-# 实现参考：reference/ai-autodj/cuekey（tempo/key/energy/cues/cache/analyzer 全套）
-# 与 B1 约定一致：分析用 22050Hz mono；bpm=0/key="?" 表示"未记录"（empty_record 降级）
+# 约定：分析用 22050Hz mono；bpm=0/key="?" 表示"未记录"（empty_record 降级）
 
 from __future__ import annotations
 

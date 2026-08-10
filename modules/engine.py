@@ -1,6 +1,4 @@
 # 音频引擎模块：双打碟机 + 三频 EQ + 横推 + 主混音 + 双输出监听（M1 核心）
-# 参考：reference/dj-engine/songs-automixer_python（audio_engine.py 状态机与混音、
-#   cue_player.py 双输出、fx.py 系数/处理分离纪律）；mixxx enginexfader 常量功率曲线
 
 from __future__ import annotations
 
@@ -22,6 +20,9 @@ BLOCK_SIZE = int(_SC.base.get("block_size", 2048))
 
 # 主增益上限（+6dB boost 能力；输出硬限幅 ±1.0 保护设备，B1 约定）
 MAX_GAIN = 2.0
+
+# VU 电平环形缓冲长度（每盘；回调每块写一个峰值，UI 定时器读最近值）
+VU_BUFFER = 32
 
 
 class State(Enum):
@@ -113,6 +114,24 @@ class Biquad:
         a = np.array([1.0 + alpha / A, -2.0 * cos_w0, 1.0 - alpha / A])
         self._set_coeffs(b, a)
 
+    def highpass(self, cutoff: float, q: float = 0.707) -> None:
+        # 高通滤波（RBJ 直接型；Beat FX HPF 用）
+        w0 = 2.0 * np.pi * cutoff / self.sr
+        alpha = np.sin(w0) / (2.0 * q)
+        cos_w0 = np.cos(w0)
+        b = np.array([(1.0 + cos_w0) / 2.0, -(1.0 + cos_w0), (1.0 + cos_w0) / 2.0])
+        a = np.array([1.0 + alpha, -2.0 * cos_w0, 1.0 - alpha])
+        self._set_coeffs(b, a)
+
+    def lowpass(self, cutoff: float, q: float = 0.707) -> None:
+        # 低通滤波（RBJ 直接型；Beat FX LPF 用）
+        w0 = 2.0 * np.pi * cutoff / self.sr
+        alpha = np.sin(w0) / (2.0 * q)
+        cos_w0 = np.cos(w0)
+        b = np.array([(1.0 - cos_w0) / 2.0, 1.0 - cos_w0, (1.0 - cos_w0) / 2.0])
+        a = np.array([1.0 + alpha, -2.0 * cos_w0, 1.0 - alpha])
+        self._set_coeffs(b, a)
+
     def reset(self) -> None:
         # 清除延迟状态（换曲/重开时防滤波振铃串音）
         self._zi = None
@@ -196,6 +215,81 @@ class DeckEQ:
 
 
 # ---------------------------------------------------------------------------
+# E1.8 效果库扩展：反馈延迟线（Echo/Delay）
+# ---------------------------------------------------------------------------
+
+
+class FeedbackDelay:
+    # 反馈延迟线（Echo/Delay 共用）：预分配环形缓冲，零运行时分配
+    # Echo=短延迟高反馈；Delay=长延迟低反馈（多 tap）
+    def __init__(self, sr: int, max_delay_seconds: float = 2.0):
+        # 初始化：缓冲 = 最大延迟 + 2 块（防读切片越界）；输出缓冲预分配
+        self.sr = sr
+        self._buf_len = int(max_delay_seconds * sr) + 2 * BLOCK_SIZE
+        self._buf = np.zeros((self._buf_len, CHANNELS), dtype=np.float32)
+        self._out = np.zeros((BLOCK_SIZE, CHANNELS), dtype=np.float32)
+        self._pos = 0
+        self._delay = int(0.25 * sr)
+        self._feedback = 0.4
+        self._n_taps = 1
+
+    def configure(self, delay_seconds: float, feedback: float, n_taps: int = 1) -> None:
+        # 配置延迟时长/反馈量/多 tap 数（参数变更防咔嗒：旧缓冲保留继续写）
+        self._delay = max(1, int(delay_seconds * self.sr))
+        self._feedback = max(0.0, min(0.95, float(feedback)))
+        self._n_taps = max(1, min(4, int(n_taps)))
+
+    def process(self, x: np.ndarray, frames: int) -> np.ndarray:
+        # 就地处理：out = x + Σ(feedback^tap × 延迟 tap 采样)；返回 x
+        # 环形分段读取：支持块跨 delay 边界（块起始未满但块内已满的部分要读）与
+        # 缓冲回绕（read/写入越界时拆两段）
+        out = self._out[:frames]
+        out[:] = x
+        for tap in range(1, self._n_taps + 1):
+            delay = self._delay * tap
+            fb = self._feedback**tap
+            # 本块内第一个可读到延迟前样本的位置（块起始不足 delay 时前半无回声）
+            start = max(0, delay - self._pos)
+            if start >= frames:
+                continue  # 本块完全在延迟未满区
+            read = (self._pos + start - delay) % self._buf_len
+            n = frames - start
+            n1 = min(n, self._buf_len - read)
+            out[start : start + n1] += fb * self._buf[read : read + n1]
+            if n1 < n:  # 回绕到缓冲开头
+                out[start + n1 :] += fb * self._buf[0 : n - n1]
+        # 写入（同样处理回绕）
+        n1 = min(frames, self._buf_len - self._pos)
+        self._buf[self._pos : self._pos + n1] = out[:n1]
+        if n1 < frames:
+            self._buf[0 : frames - n1] = out[n1:]
+        self._pos = (self._pos + frames) % self._buf_len
+        x[:] = out
+        return x
+
+    def reset(self) -> None:
+        # 清空延迟缓冲（换曲/重开时防旧回声）
+        self._buf[:] = 0
+        self._pos = 0
+
+
+class Echo(FeedbackDelay):
+    # Echo：短延迟（250ms）+ 高反馈（0.6），经典回声
+    def __init__(self, sr: int):
+        # 初始化反馈延迟线并配置 Echo 参数
+        super().__init__(sr)
+        self.configure(0.25, 0.6)
+
+
+class Delay(FeedbackDelay):
+    # Delay：长延迟（0.375s≈120BPM 八分音符）+ 中反馈（0.4）+ 3 tap
+    def __init__(self, sr: int):
+        # 初始化反馈延迟线并配置 Delay 参数
+        super().__init__(sr)
+        self.configure(0.375, 0.4, n_taps=3)
+
+
+# ---------------------------------------------------------------------------
 # 打碟机（双实例，共享引擎锁）
 # ---------------------------------------------------------------------------
 
@@ -219,6 +313,35 @@ class Deck:
         self._loop_start: int = 0
         self._loop_end: int = 0
         self.eq = DeckEQ(sr)
+        # --- E2 支撑：TRIM 预增益与 Beat FX 链（E1.8 效果库应用） ---
+        self._pregain: float = 1.0
+        self._fx_effect: str = ""  # "" | HPF | LPF | Trans | Echo | Delay
+        self._fx_depth: float = 0.0
+        self._fx_filter = Biquad(sr)  # HPF/LPF 复用
+        self._fx_delay = FeedbackDelay(sr)
+        # --- E1 扩展状态（FLX4 复刻） ---
+        # Hot Cue 槽位：slot(0-7) → 样本位置
+        self._hot_cues: dict[int, int] = {}
+        # 当前曲 BPM（Beat Jump/Tap 用；UI 加载曲目时设置）
+        self._bpm: float = 0.0
+        # Key Shift 半音（±12，-12..0..+12；实际渲染由预渲染管线执行）
+        self._key_shift: int = 0
+        # Jog：触摸态 / 弯音速率（±0.5）/ 高速搜索速率（含符号，±16 倍）
+        self._jog_touched: bool = False
+        self._jog_bend_rate: float = 0.0
+        self._jog_search_rate: float = 0.0
+        # Slip 模式：真实位置暗中推进，播放位置（_position）可被搓碟自由移动
+        self._slip_active: bool = False
+        self._slip_actual: int = 0
+        # Sampler：8 槽音频 + 当前播放 (slot, pos)
+        self._samples: dict[int, np.ndarray] = {}
+        self._sample_playing: Optional[tuple] = None
+        # Tap BPM：时间戳队列（秒）
+        self._tap_times: list = []
+        # Censor：按住期间反向播放
+        self._reverse: bool = False
+        # Trans 门控相位（跨块持续）
+        self._trans_phase: int = 0
 
     # --- 传输控制 ---
 
@@ -278,6 +401,188 @@ class Deck:
     def cue_seconds(self) -> float:
         # CUE 点秒数（UI 显示用）
         return self._cue_sample / self.sr
+
+    # --- E1.1 Hot Cue（8 槽） ---
+
+    def hot_cue_set(self, slot: int) -> None:
+        # 存储当前位置到热 CUE 槽（0-7；越界忽略）
+        with self._lock:
+            if 0 <= slot < 8:
+                self._hot_cues[slot] = self._position
+
+    def hot_cue_play(self, slot: int) -> None:
+        # 跳转到热 CUE 槽并播放（无音频/槽空忽略）
+        with self._lock:
+            if 0 <= slot < 8 and slot in self._hot_cues and self._now_audio is not None:
+                self._position = min(self._hot_cues[slot], len(self._now_audio))
+                self._paused = False
+                if self.state == State.IDLE:
+                    self.state = State.PLAYING
+                self._pending_mix_at = None
+
+    def hot_cue_clear(self, slot: int) -> None:
+        # 清除热 CUE 槽（越界忽略）
+        with self._lock:
+            if 0 <= slot < 8:
+                self._hot_cues.pop(slot, None)
+
+    def hot_cue_state(self, slot: int) -> dict:
+        # 热 CUE 槽状态（UI 灯态用）：{has, seconds}
+        with self._lock:
+            sample = self._hot_cues.get(slot)
+            return {"has": sample is not None, "seconds": (sample or 0) / self.sr}
+
+    # --- E1.2 Beatgrid 跳转 ---
+
+    def set_tempo(self, bpm: float) -> None:
+        # 设置当前曲 BPM（Beat Jump/Tap 计算用；UI 加载曲目时调用）
+        with self._lock:
+            self._bpm = max(0.0, float(bpm))
+
+    def beat_jump(self, beats: int, align: bool = False) -> None:
+        # 按拍跳转：±beats 拍；align=True（Skip 模式）时先对齐最近拍边界
+        with self._lock:
+            if self._now_audio is None or self._bpm <= 0:
+                return
+            beat_len = int(60.0 / self._bpm * self.sr)
+            target = self._position + beats * beat_len
+            if align:
+                target = target - (target % beat_len)
+            self._position = max(0, min(target, len(self._now_audio)))
+
+    # --- E1.3 Key Shift 半音 ---
+
+    def set_key_shift(self, semitones: int) -> None:
+        # 设置 Key Shift（钳制 ±12；仅存状态，实际变调渲染由预渲染管线执行）
+        with self._lock:
+            self._key_shift = max(-12, min(12, int(semitones)))
+
+    @property
+    def key_shift(self) -> int:
+        # 当前 Key Shift 半音数（UI 显示/灯态）
+        return self._key_shift
+
+    # --- E1.4 Jog 转盘接口 ---
+
+    def jog_touch(self, on: bool) -> None:
+        # 设置转盘触摸态（搓碟/弯音判定依据）
+        with self._lock:
+            self._jog_touched = bool(on)
+
+    def jog_scratch(self, delta_samples: int) -> None:
+        # 搓碟：触摸时位置偏移（正负皆可，钳制曲内）
+        with self._lock:
+            if self._now_audio is None:
+                return
+            self._position = max(
+                0, min(self._position + int(delta_samples), len(self._now_audio))
+            )
+
+    def jog_bend(self, rate: float) -> None:
+        # 弯音：临时播放速率偏移（±0.5；0=恢复原速）
+        with self._lock:
+            self._jog_bend_rate = max(-0.5, min(0.5, float(rate)))
+
+    def jog_search(self, rate: float) -> None:
+        # SHIFT 高速搜索：速率倍数（±16；0=停止）
+        with self._lock:
+            self._jog_search_rate = max(-16.0, min(16.0, float(rate)))
+
+    # --- E1.6 Slip 模式 ---
+
+    def slip_toggle(self, active: bool) -> None:
+        # 开关 Slip：开启时记录真实位置（暗中推进），关闭时播放位置落回真实位置
+        with self._lock:
+            if active and not self._slip_active:
+                self._slip_actual = self._position
+            elif not active and self._slip_active:
+                if self._now_audio is not None:
+                    self._position = min(self._slip_actual, len(self._now_audio))
+            self._slip_active = bool(active)
+
+    @property
+    def slip_active(self) -> bool:
+        # Slip 状态（UI 灯态）
+        return self._slip_active
+
+    # --- E1.7 Sampler 槽位 ---
+
+    def sample_load(self, slot: int, audio: np.ndarray) -> None:
+        # 载入采样到槽位（0-7；停止当前播放并替换）
+        with self._lock:
+            if 0 <= slot < 8 and audio is not None and len(audio) > 0:
+                self._samples[slot] = audio
+                if self._sample_playing is not None and self._sample_playing[0] == slot:
+                    self._sample_playing = None
+
+    def sample_play(self, slot: int) -> None:
+        # 播放槽位采样（若已在播则从头重播；只同时播一个）
+        with self._lock:
+            if 0 <= slot < 8 and slot in self._samples:
+                self._sample_playing = (slot, 0)
+
+    def sample_stop(self, slot: int) -> None:
+        # 停止槽位采样播放
+        with self._lock:
+            if self._sample_playing is not None and self._sample_playing[0] == slot:
+                self._sample_playing = None
+
+    def sample_unload(self, slot: int) -> None:
+        # 卸载槽位采样（同时停止播放）
+        with self._lock:
+            if 0 <= slot < 8:
+                self._samples.pop(slot, None)
+                if self._sample_playing is not None and self._sample_playing[0] == slot:
+                    self._sample_playing = None
+
+    def sample_state(self, slot: int) -> dict:
+        # 槽位状态（UI 灯态）：{loaded, playing}
+        with self._lock:
+            return {
+                "loaded": slot in self._samples,
+                "playing": self._sample_playing is not None
+                and self._sample_playing[0] == slot,
+            }
+
+    # --- E1.9 传输辅助 ---
+
+    def tap(self) -> float:
+        # Tap BPM：记录时间戳，用最近间隔中值算 BPM（返回 0 表示样本不足）
+        import time
+
+        with self._lock:
+            now = time.time()
+            self._tap_times.append(now)
+            if len(self._tap_times) > 8:
+                self._tap_times.pop(0)
+            if len(self._tap_times) < 2:
+                return 0.0
+            intervals = sorted(
+                self._tap_times[i + 1] - self._tap_times[i]
+                for i in range(len(self._tap_times) - 1)
+            )
+            median = intervals[len(intervals) // 2]
+            if median <= 0.0:
+                return 0.0
+            bpm = 60.0 / median
+            if bpm > 0:
+                self._bpm = bpm
+            return bpm
+
+    def censor(self, active: bool) -> None:
+        # Censor：按住期间反向播放（释放恢复正向）
+        with self._lock:
+            self._reverse = bool(active)
+
+    def stutter(self) -> None:
+        # Stutter：回到 CUE 点立即播放（重复触发产生顿挫）
+        with self._lock:
+            if self._now_audio is None:
+                return
+            self._position = min(self._cue_sample, len(self._now_audio))
+            self._paused = False
+            if self.state == State.IDLE:
+                self.state = State.PLAYING
 
     # --- 循环（D2.11） ---
 
@@ -364,9 +669,15 @@ class Deck:
         else:
             self._fill_mixing(out, frames)
         self.eq.process(out)
+        # TRIM 预增益（EQ 后、FX 前；回调内零分配）
+        if self._pregain != 1.0:
+            out *= self._pregain
+        # Beat FX 链应用（E2.4 面板驱动）
+        self._apply_fx(out)
 
     def _fill_playing(self, out: np.ndarray, frames: int) -> None:
-        # 播放填充：处理定时切歌分割、循环回绕、自然结尾置 IDLE
+        # 播放填充：定时切歌分割、循环回绕、弯音/搜索步长、反向(Censor)、
+        # Slip 双位置、采样叠加、自然结尾置 IDLE
         if self._now_audio is None:
             out[:] = 0
             return
@@ -390,9 +701,44 @@ class Deck:
                 self._fill_mixing(out[frames_before:], frames_after)
             return
 
-        chunk = self._get_chunk(frames)
-        out[:] = chunk
-        self._position += frames
+        # Censor：反向播放（按住期间）
+        if self._reverse:
+            self._position -= frames
+            if self._position <= 0:
+                self._position = 0
+                self._reverse = False
+            out[:] = self._get_chunk_reverse(frames)
+            return
+
+        # Slip：真实位置按原速暗中推进，播放位置不自动前进（由 jog_scratch 控制）
+        if self._slip_active:
+            self._slip_actual = min(self._slip_actual + frames, len(self._now_audio))
+            self._position = max(0, min(self._position, len(self._now_audio)))
+            out[:] = self._get_chunk(frames)
+            self._mix_sample(out)
+            return
+
+        # 步长：高速搜索 > 弯音 > 原速
+        step = frames
+        if self._jog_search_rate != 0.0:
+            step = int(round(frames * abs(self._jog_search_rate)))
+            if self._jog_search_rate < 0:
+                self._position = max(0, self._position - step)
+                out[:] = self._get_chunk_reverse(frames)
+                return
+        elif self._jog_bend_rate != 0.0:
+            step = int(round(frames * (1.0 + self._jog_bend_rate)))
+
+        if step != frames:
+            chunk = self._get_chunk(step)
+            out[:] = chunk[:frames]
+        else:
+            out[:] = self._get_chunk(frames)
+        self._position += step
+
+        # Sampler 叠加（在 EQ 前混入采样）
+        self._mix_sample(out)
+
         if not self._loop_active and self._position >= len(self._now_audio):
             self.state = State.IDLE
 
@@ -445,6 +791,88 @@ class Deck:
             chunk = np.concatenate([chunk, pad], axis=0)
         return chunk
 
+    def _get_chunk_reverse(self, frames: int) -> np.ndarray:
+        # 反向取块（Censor/负向搜索）：从当前位置向前取 frames 样本并倒序
+        audio = self._now_audio
+        if audio is None:
+            return np.zeros((frames, CHANNELS), dtype=np.float32)
+        start = max(0, self._position - frames)
+        chunk = audio[start : self._position]
+        # 不足补零后倒序
+        if len(chunk) < frames:
+            pad = np.zeros((frames - len(chunk), CHANNELS), dtype=np.float32)
+            chunk = np.concatenate([pad, chunk], axis=0)
+        return chunk[::-1].copy()
+
+    def _mix_sample(self, out: np.ndarray) -> None:
+        # 采样叠加：把正在播放的采样混入输出块（单槽同时播放）
+        if self._sample_playing is None:
+            return
+        slot, pos = self._sample_playing
+        audio = self._samples.get(slot)
+        if audio is None:
+            self._sample_playing = None
+            return
+        n = len(out)
+        chunk = audio[pos : pos + n]
+        if len(chunk) < n:
+            out[: len(chunk)] += chunk
+            self._sample_playing = None
+        else:
+            out[:] += chunk
+            self._sample_playing = (slot, pos + n)
+
+    # --- E2 支撑：TRIM / Beat FX ---
+
+    def set_pregain(self, gain: float) -> None:
+        # 设置 TRIM 预增益（0-2，1=unity）
+        with self._lock:
+            self._pregain = max(0.0, min(2.0, float(gain)))
+
+    def set_fx(self, effect: str, depth: float) -> None:
+        # 设置 Beat FX（effect ∈ ""/HPF/LPF/Trans/Echo/Delay；depth 0-1）
+        # 系数在 UI 线程算（同 EQ 纪律），回调只执行
+        with self._lock:
+            self._fx_effect = effect
+            self._fx_depth = max(0.0, min(1.0, float(depth)))
+            if effect == "HPF" and depth > 0.01:
+                # 截止随 depth 对数升高（300Hz → 4000Hz）
+                cutoff = 300.0 * (4000.0 / 300.0) ** depth
+                self._fx_filter = Biquad(self.sr)
+                self._fx_filter.highpass(cutoff)
+            elif effect == "LPF" and depth > 0.01:
+                cutoff = 10000.0 * (250.0 / 10000.0) ** depth
+                self._fx_filter = Biquad(self.sr)
+                self._fx_filter.lowpass(cutoff)
+            else:
+                self._fx_filter = Biquad(self.sr)
+            if effect == "Echo":
+                self._fx_delay.configure(0.25, 0.3 + 0.4 * depth)
+            elif effect == "Delay":
+                self._fx_delay.configure(0.375, 0.2 + 0.3 * depth, n_taps=3)
+
+    def _apply_fx(self, out: np.ndarray) -> None:
+        # Beat FX 执行（回调内；depth=0 旁通）
+        if self._fx_depth <= 0.01 or not self._fx_effect:
+            return
+        effect = self._fx_effect
+        if effect in ("HPF", "LPF"):
+            self._fx_filter.process(out)
+        elif effect in ("Echo", "Delay"):
+            self._fx_delay.process(out, len(out))
+        elif effect == "Trans" and self._bpm > 0:
+            # 节拍门控：50% 占空比，随 depth 变密（1/4 → 1/32 阶梯）
+            div = [0, 4, 8, 16, 32][min(4, int(self._fx_depth * 5))]
+            if div > 0:
+                beat = self.sr * 60.0 / self._bpm
+                period = max(2.0, beat * 4.0 / div)
+                n = len(out)
+                phase = np.arange(0, n, dtype=np.float64)
+                pos = np.mod(phase + self._trans_phase, period)
+                gain = np.where(pos < period * 0.5, 1.0, 0.0).astype(np.float32)
+                out *= gain[:, None]
+                self._trans_phase = int((self._trans_phase + n) % (period * 64))
+
 
 # ---------------------------------------------------------------------------
 # 横推（D2.8，参考 mixxx enginexfader 常量功率曲线）
@@ -481,9 +909,9 @@ class Crossfader:
 
 
 class AudioEngine:
-    # 主音频引擎：两个打碟机 + 横推混合 + 主音量；常驻 OutputStream 实时回调
+    # 主音频引擎：两个打碟机 + 横推混合 + 主音量 + 通道推子 + VU 采集；常驻 OutputStream
     def __init__(self, device=None, master_volume: float = 1.0):
-        # 初始化：锁、双 deck、横推、主音量、预分配混合缓冲；开输出流
+        # 初始化：锁、双 deck、横推、主音量、预分配缓冲；开输出流
         self._lock = threading.Lock()
         self.deck_a = Deck(self._lock)
         self.deck_b = Deck(self._lock)
@@ -492,6 +920,12 @@ class AudioEngine:
         # 回调内复用的中间缓冲（预分配，实时线程零分配纪律）
         self._buf_a = np.zeros((BLOCK_SIZE, CHANNELS), dtype=np.float32)
         self._buf_b = np.zeros((BLOCK_SIZE, CHANNELS), dtype=np.float32)
+        # --- E1.5 VU 电平（方案 C）：每盘峰值环形数组（预分配）+ 写指针 ---
+        self._vu_peaks = np.zeros((2, VU_BUFFER), dtype=np.float32)
+        self._vu_idx = 0
+        # --- E1.9 通道推子与 Fader Start ---
+        self._ch_fader = [1.0, 1.0]
+        self._fader_start = False
         self._stream = sd.OutputStream(
             device=device,
             samplerate=SAMPLE_RATE,
@@ -501,6 +935,43 @@ class AudioEngine:
             blocksize=BLOCK_SIZE,
         )
         self._stream.start()
+
+    # --- E1.5 VU 电平 ---
+
+    def vu_levels(self) -> list:
+        # 当前两盘峰值电平（UI 定时器读取；最近槽位）
+        with self._lock:
+            idx = (self._vu_idx - 1) % VU_BUFFER
+            return [float(self._vu_peaks[0, idx]), float(self._vu_peaks[1, idx])]
+
+    # --- E1.9 通道推子 / Fader Start ---
+
+    def set_channel_fader(self, deck_index: int, value: float) -> None:
+        # 设置通道推子（0-1）；Fader Start 开启时联动播放/停止
+        # 注意：锁已持有，内部直接操作状态（不可调 stop() 等锁内方法，防重入死锁）
+        with self._lock:
+            self._ch_fader[deck_index] = max(0.0, min(1.0, float(value)))
+            if self._fader_start:
+                deck = self.deck_a if deck_index == 0 else self.deck_b
+                if self._ch_fader[deck_index] > 0.01:
+                    deck._paused = False
+                    if deck.state == State.IDLE and deck._now_audio is not None:
+                        deck.state = State.PLAYING
+                else:
+                    # 拉到底停止（锁内联实现，等价 deck.stop() 的清理）
+                    deck.state = State.IDLE
+                    deck._now_audio = None
+                    deck._next_audio = None
+                    deck._position = 0
+                    deck._paused = False
+                    deck._pending_mix_at = None
+                    deck._loop_active = False
+                    deck.eq.reset()
+
+    def set_fader_start(self, enabled: bool) -> None:
+        # 开关 Fader Start 模式（推子从 0 推起=播放、拉到底=停止）
+        with self._lock:
+            self._fader_start = bool(enabled)
 
     # --- 主音量（D2.9） ---
 
@@ -543,18 +1014,27 @@ class AudioEngine:
     # --- 实时回调（D2.15：零 IO、锁内短、异常 fail-soft 静音） ---
 
     def _callback(self, outdata: np.ndarray, frames: int, time, status) -> None:
-        # 实时线程回调：填双盘 → 各盘 EQ → 横推混合 → 主音量 → 硬限幅
+        # 实时线程回调：填双盘 → 各盘 EQ → 通道推子 → 横推混合 → VU 采集 → 主音量限幅
         try:
             with self._lock:
                 self.deck_a.fill(self._buf_a, frames)
                 self.deck_b.fill(self._buf_b, frames)
                 gain_a, gain_b = self.crossfader.get_gains()
+                fa, fb = self._ch_fader[0], self._ch_fader[1]
                 if gain_a == 1.0 and gain_b == 0.0:
-                    outdata[:] = self._buf_a
+                    outdata[:] = self._buf_a * fa
                 elif gain_b == 1.0 and gain_a == 0.0:
-                    outdata[:] = self._buf_b
+                    outdata[:] = self._buf_b * fb
                 else:
-                    outdata[:] = self._buf_a * gain_a + self._buf_b * gain_b
+                    outdata[:] = self._buf_a * gain_a * fa + self._buf_b * gain_b * fb
+                # VU 采集（方案 C）：峰值写预分配环形数组（max/min 组合，无新数组）
+                self._vu_peaks[0, self._vu_idx % VU_BUFFER] = max(
+                    float(self._buf_a.max()), -float(self._buf_a.min())
+                )
+                self._vu_peaks[1, self._vu_idx % VU_BUFFER] = max(
+                    float(self._buf_b.max()), -float(self._buf_b.min())
+                )
+                self._vu_idx += 1
                 if self._volume != 1.0:
                     outdata *= self._volume
                     if self._volume > 1.0:

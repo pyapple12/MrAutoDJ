@@ -1,5 +1,4 @@
 # 转场规划模块：判定来曲是否需要变速拉伸，以及拉伸速率（纯函数，可单测）
-# 完整照抄参考：reference/dj-engine/songs-automixer_python/automix/transition.py
 
 from __future__ import annotations
 

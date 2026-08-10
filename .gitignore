@@ -182,7 +182,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # 参考项目为外部 clone，不纳入本仓库版本控制
-reference/
+.reference/
 
 # opencode 项目级配置，含插件依赖
 .opencode/
@@ -190,6 +190,7 @@ reference/
 # 归档与临时
 archived/
 .temp/
+.history/
 
 # 凭据：严禁提交
 opencode-go.json

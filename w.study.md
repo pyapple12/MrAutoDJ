@@ -727,3 +727,126 @@ LLM (Claude/Cursor) ⇄ FastMCP server ⇄ OSC UDP bridge ⇄ Mixxx（11118/1111
 ---
 
 > 本报告为研读汇总，任务勾选状态见 `x.progress.md`。
+
+---
+
+# B13 Pioneer DJ DDJ-FLX4 控制器学习报告（一比一复刻依据）
+
+> 资料来源：官方用户手册（165 页）、Mixxx 开源映射文档（中文）、Mixxx MIDI 映射表（281 控件）。
+> 目标：MrAutoDJ 虚拟 DJ 台按此布局与功能一比一复刻。
+
+
+## 1. 布局总览（四大功能区）
+
+```
+┌─────────────────────────────────────────────────────┐
+│ 1 Browse 浏览区（LOAD×2 + Rotary 旋钮）              │
+├───────────────────────────┬─────────────────────────┤
+│ 2 Deck 1 盘区（16 部件）   │ 2 Deck 2 盘区（同左）    │
+├───────────────────────────┴─────────────────────────┤
+│ 3 Mixer 混音区（TRIM/EQ×3/CFX/CUE/Fader/横推等 15 件）│
+├─────────────────────────────────────────────────────┤
+│ 4 Effects 效果区（Beat FX：通道选择/效果选择/拍数/深度）│
+└─────────────────────────────────────────────────────┘
+```
+
+## 2. Browse 浏览区（每盘 2 件）
+
+| 部件 | 功能 | SHIFT 组合 |
+|---|---|---|
+| LOAD 按钮 ×2 | 加载选中曲目到对应盘；**按两次=Instant Doubles**（从空闲盘复制曲目到播放盘、同位置播放） | D1: 跳到 Related Tracks；D2: 缩放浏览区 |
+| Rotary 选择旋钮 | 转动=移动光标；按下=切换焦点（树/曲目列表） | 转动=缩放波形 |
+
+## 3. Deck 盘区（每盘 16 部件，核心）
+
+| # | 部件 | 按下 | 播放中 | SHIFT 组合 |
+|---|---|---|---|---|
+| 1 | IN 按钮 | 设循环入点 | 用转盘微调入点 | 循环入点调整模式 |
+| 2 | OUT 按钮 | 设循环出点并开始循环 | 用转盘微调出点 | 循环出点调整模式 |
+| 3 | 4BEAT/EXIT | 开始 4 拍 Auto Beat Loop | 取消循环 | 设置/取消 Active Loop |
+| 4 | CUE/LOOP CALL ◁ | 调用 CUE/循环点 | **循环减半** | 删除调用点 |
+| 5 | CUE/LOOP CALL ▷ | 调用 CUE/循环点 | **循环加倍** | CUE 待机保存/循环保存 |
+| 6 | BEAT SYNC | 同步到主盘 BPM/节拍网格 | 取消同步 | 切换 TEMPO 量程（±6/10/16/WIDE%） |
+| 6 | BEAT SYNC 长按 | **设为主盘** | - | - |
+| 7 | TEMPO 推子 | 变速（量程可切） | - | - |
+| 8 | HOT CUE 模式键 | 进入热 CUE 模式（Pad 用） | - | Keyboard 模式 |
+| 9 | PAD FX1 模式键 | Pad FX 模式 1 | - | Pad FX 模式 2 |
+| 10 | BEAT JUMP 模式键 | Beat Jump 模式 | - | Beat Loop 模式 |
+| 11 | SAMPLER 模式键 | Sampler 模式 | - | Key Shift 模式 |
+| 12 | Performance Pads ×8 | 按模式触发功能 | - | 视模式 |
+| 13 | PLAY/PAUSE | 播放/暂停 | - | Serato: Stutter |
+| 14 | CUE | 暂停时设 CUE；播放中回 CUE 并暂停（Back Cue）；按住=Cue Point Sampler | - | 回到曲首 |
+| 15 | SHIFT | 组合键修饰 | - | - |
+| 16 | Jog 转盘 | **顶面 Vinyl 模式开=搓碟；顶面/外圈=弯音 Pitch Bend**；SHIFT+顶面=高速快进/退 | - | - |
+
+### Pad 八种模式（性能打击垫）
+| 模式 | Pad 1-8 功能 |
+|---|---|
+| Hot Cue | 未亮=存热 CUE；亮=跳转（暂停时按住=预听）；SHIFT+亮=删除 |
+| Beat Loop | 1/4、1/2、1、2、4、8、16、32 拍循环（Pad 位置即拍数） |
+| Beat Jump | 前/后跳 1、2、4、8 拍；SHIFT+Pad7/8 跳 16 倍 |
+| Sampler | 加载采样/播放/停止卸载 |
+| Keyboard（Mixxx 映射为 Stems） | Pad1-4=人声/鼓/贝斯/其他 静音切换；Pad5-8=stem FX |
+| Key Shift（Pitch Shift） | Pad 设置绝对半音（±1-4）；SHIFT+Pad 相对增减；Pad1/8 复位 0 |
+| Pad FX1/2 | 效果触发（rekordbox 未实现于 Mixxx） |
+
+## 4. Mixer 混音区（15 件）
+
+| # | 部件 | 功能 |
+|---|---|---|
+| 1 | TRIM 旋钮 ×2 | 每通道预增益 |
+| 2 | MASTER LEVEL | 主输出音量 |
+| 3 | 耳机 CUE（master） | 主输出送入耳机 |
+| 4 | Bluetooth MIDI 指示灯 | 连接状态 |
+| 5 | 通道电平指示 ×2 | 通道音量（过推子前） |
+| 6 | EQ（HI/MID/LOW）×2 | 三频增强/衰减 |
+| 7 | MIC LEVEL | 麦克风音量 |
+| 8 | CFX 旋钮 ×2 | SMART CFX 关=Sound Color FX（中心=原声）；开=Smart CFX |
+| 9 | SMART CFX 按钮 | 开/关；SHIFT=换预设 |
+| 10 | 耳机 CUE（通道）×2 | 通道送耳机；SHIFT+点按=Tap BPM |
+| 11 | HEADPHONES MIX | 耳机监听平衡（CUE 通道 vs 主输出） |
+| 12 | HEADPHONES LEVEL | 耳机音量 |
+| 13 | SMART FADER 按钮 | 智能横推模式（自动音量/低音/BPM 适配） |
+| 14 | Channel Fader ×2 | 通道音量（SHIFT+推=触发 Fader Start） |
+| 15 | Crossfader | 左右通道平衡（曲线可设；SHIFT+推=Fader Start） |
+
+## 5. Effects 效果区（6 件）
+
+| # | 部件 | 功能 | SHIFT |
+|---|---|---|---|
+| 1 | BEAT FX CH SELECT 开关 | 效果目标通道（CH1/CH2/双） | - |
+| 2 | BEAT FX SELECT | 切换效果类型 | 反向切换 |
+| 3 | BEAT ◁ | 拍数-1（效果同步长度） | BPM Auto 模式 |
+| 4 | BEAT ▷ | 拍数+1 | BPM Tap 模式 |
+| 5 | BEAT FX LEVEL/DEPTH | 效果参数 | - |
+| 6 | BEAT FX ON/OFF | 开/关 | Release FX |
+
+## 6. 前后面板
+
+- **Rear**：USB 供电口、USB 设备口（PC/Mac/iOS/Android）、Android MONO/STEREO 开关、MASTER 输出（RCA）、MIC 输入（1/4" TS）、MIC ATT 衰减、Kensington 锁孔
+- **Front**：PHONES 耳机输出（3.5mm）
+
+## 7. MIDI 映射要点（Mixxx 281 控件，供硬件对接）
+
+- 信号格式：`0x9X`=Note On（按钮）、`0xBX`=CC（推子/旋钮）、`0xBX/0x3F` 等=LSB/MSB 双字节高精度推子、`0x94/0x95`=Pad 通道
+- Deck1 用通道 1（0x90/0xB0），Deck2 用通道 2（0x91/0xB1）；FX 区用 0x94；Crossfader/耳机等 Master 用 0xB6
+- 代表映射：PLAY=0x90/0x0B、CUE=0x90/0x0C、Loop IN=0x90/0x10、OUT=0x90/0x11、Beatloop 4=0x90/0x10（4BEAT 与 IN 同键复用）、Tempo=CC 0x20(LSB)+0x00(MSB)、Crossfader=0xB6/0x1F(LSB)+0x3F(MSB)、EQ 三频=CC 0x27/0x2B/0x2F(MSB)+0x07/0x0B/0x0F(LSB)、Jog 顶面=0xB0/0x22（Vinyl）、外圈=0xB0/0x21、Jog 触摸=0x90/0x36
+- Pad 模式键：HOT CUE=0x90/0x1B、KEYBOARD=0x90/0x69、PAD FX1=0x90/0x1E、PAD FX2=0x90/0x6B、BEAT JUMP=0x90/0x20、BEAT LOOP=0x90/0x6D、SAMPLER=0x90/0x22 系
+- **LED 反馈**：每个按钮/旋钮有对应 LED 控制（Note/CC 输出），Mixxx 映射含 LED 状态逻辑（如 Pitch Shift 模式的灯阵）
+
+## 8. MrAutoDJ 对照（差距清单）
+
+### 已实现（M1）
+- 双盘播放/暂停/CUE（含 Back Cue 语义）、Loop IN/OUT/4BEAT/加倍减半、Beat Sync 待接、Tempo 变速、Jog 弯音、三频 EQ、横推（等功率）、通道/主音量、双输出耳机监听
+
+### 未实现（一比一复刻需补）
+1. **Browse 区**：LOAD 双按=Instant Doubles；Rotary 旋钮（光标/树切换）；波形缩放
+2. **Jog 转盘**：顶面搓碟（Vinyl 模式）；外圈/顶面 Pitch Bend 区分；Jog 触摸检测；SHIFT+转=高速搜索
+3. **Pad 8 模式**：Hot Cue 灯态/预听、Beat Loop 拍数矩阵、Beat Jump 前后跳、Sampler、Key Shift 半音（LED 灯阵）
+4. **Mixer**：TRIM 预增益、通道电平指示、CFX/Smart CFX 效果旋钮、Smart Fader、Fader Start、Tap BPM、MIC（输入）
+5. **Effects**：Beat FX 全套（通道选择/效果选择/拍数/BPM Auto-Tap/深度）
+6. **组合键体系**：全局 SHIFT 修饰（每键第二功能）、长按（主盘设置）、双按（Instant Doubles）
+7. **LED 反馈体系**：按钮灯态（Hot Cue 亮/灭、模式指示、Pitch Shift 灯阵）
+8. **Slip 模式 / Censor / Stutter** 等表演功能（Mixxx 已映射：reverseroll 等）
+
+> 结论：MrAutoDJ 下一步 UI/交互迭代按本报告第 2-5 节一比一布局；MIDI 硬件支持（M2 预留）按第 7 节信号表对接，Mixxx 的 .midi.xml 为现成映射蓝本。

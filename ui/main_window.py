@@ -29,6 +29,7 @@ from modules import analyzer as analyzer_mod
 from modules.engine import AudioEngine
 from modules.transition import tempo_compatible
 from modules.transition_manager import TransitionManager
+from ui.shift_state import ShiftState
 from utils.logger import get_logger
 
 # 静态配置解包（窗口尺寸，AGENTS.md 参数约定）
@@ -57,6 +58,16 @@ class MainWindow(QMainWindow):
         # 每盘元数据：{path, bpm, key, downbeats}
         self._deck_meta = {"a": {}, "b": {}}
         self._library: list = []  # [{path, bpm, key, energy, record}]
+        # --- E2 状态 ---
+        self._shift = ShiftState(self)
+        # Instant Doubles：上次加载 (path, time)；500ms 内同路径再次加载 → 复制到另一盘
+        self._last_load = (None, 0.0)
+        # 表演键状态（LED 刷新用）
+        self._slip_btns: dict = {}
+        self._censor_btns: dict = {}
+        # Beat FX 目标盘配置（E2.4 面板 → 引擎）
+        self._beat_fx_effect: str = ""
+        self._beat_fx_depth: float = 0.0
 
         self.setWindowTitle("MrAutoDJ")
         w = int(_SC.base.get("window_width", 1280))
@@ -74,25 +85,35 @@ class MainWindow(QMainWindow):
     # --- UI 构建 ---
 
     def _build_ui(self) -> None:
-        # 构建控件树：工具栏（打开/目标盘/加载演示）→ 曲库 + 双盘 + 混音台
+        # 构建控件树：四区布局（E3，对齐 FLX4 面板）——
+        # Browse 顶栏（LOAD A/B + 搜索 + SHIFT）→ 中部（曲库 + 双 Deck）→ 底部 Mixer + Effects
         central = QWidget()
         root = QVBoxLayout(central)
 
-        toolbar = QHBoxLayout()
-        self._open_btn = QPushButton("打开文件夹")
-        self._target_btn = QPushButton("目标盘: A")
-        toolbar.addWidget(self._open_btn)
-        toolbar.addWidget(self._target_btn)
-        toolbar.addStretch(1)
-        root.addLayout(toolbar)
-
-        body = QSplitter(Qt.Horizontal)
-        # 曲库面板
-        lib_panel = QWidget()
-        lib_box = QVBoxLayout(lib_panel)
+        # --- Browse 区（顶栏） ---
+        browse = QHBoxLayout()
+        browse.addWidget(QLabel("BROWSE"))
+        self._load_a_btn = QPushButton("LOAD A")
+        self._load_b_btn = QPushButton("LOAD B")
         self._search = QLineEdit()
         self._search.setPlaceholderText("搜索曲库...")
-        lib_box.addWidget(self._search)
+        self._open_btn = QPushButton("打开文件夹")
+        self._target_btn = QPushButton("目标盘: A")
+        # E2.1 全局 SHIFT 按钮（也可用键盘 SHIFT）
+        self._shift_btn = QPushButton("SHIFT")
+        self._shift_btn.setCheckable(True)
+        browse.addWidget(self._load_a_btn)
+        browse.addWidget(self._load_b_btn)
+        browse.addWidget(self._search, 1)
+        browse.addWidget(self._open_btn)
+        browse.addWidget(self._target_btn)
+        browse.addWidget(self._shift_btn)
+        root.addLayout(browse)
+
+        body = QSplitter(Qt.Horizontal)
+        # 曲库面板（Browse 延伸）
+        lib_panel = QWidget()
+        lib_box = QVBoxLayout(lib_panel)
         self._table = QTableWidget(0, 5)
         self._table.setHorizontalHeaderLabels(["Mix", "曲名", "BPM", "调性", "能量"])
         self._table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -101,23 +122,91 @@ class MainWindow(QMainWindow):
         lib_box.addWidget(self._table)
         body.addWidget(lib_panel)
 
-        # 双打碟机
+        # 双打碟机（含 E2 组件：Jog / Pad / 表演键）
         from ui.deck_widget import DeckWidget
+        from ui.jog_wheel import JogWheel
+        from ui.pad_widget import PadWidget
 
         self.deck_widget_a = DeckWidget("DECK A")
         self.deck_widget_b = DeckWidget("DECK B")
+        self.jog_a = JogWheel()
+        self.jog_b = JogWheel()
+        self.jog_a.set_shift_state(self._shift)
+        self.jog_b.set_shift_state(self._shift)
+        self.pad_a = PadWidget()
+        self.pad_b = PadWidget()
+        # 表演键（E2.8）：Slip / Censor / Stutter
+        self._slip_btns["a"] = self._add_perf_key("Slip")
+        self._censor_btns["a"] = self._add_perf_key("Censor")
+        self._stutter_btns = {}
+        self._stutter_btns["a"] = self._add_perf_key("Stutter")
+        self._slip_btns["b"] = self._add_perf_key("Slip")
+        self._censor_btns["b"] = self._add_perf_key("Censor")
+        self._stutter_btns["b"] = self._add_perf_key("Stutter")
+
         decks = QSplitter(Qt.Horizontal)
-        decks.addWidget(self.deck_widget_a)
-        decks.addWidget(self.deck_widget_b)
+        for wdg, jog, pad, slip, censor, stut in (
+            (
+                self.deck_widget_a,
+                self.jog_a,
+                self.pad_a,
+                self._slip_btns["a"],
+                self._censor_btns["a"],
+                self._stutter_btns["a"],
+            ),
+            (
+                self.deck_widget_b,
+                self.jog_b,
+                self.pad_b,
+                self._slip_btns["b"],
+                self._censor_btns["b"],
+                self._stutter_btns["b"],
+            ),
+        ):
+            panel = QWidget()
+            box = QVBoxLayout(panel)
+            box.addWidget(wdg, 1)
+            perf = QHBoxLayout()
+            perf.addWidget(jog)
+            pad_col = QVBoxLayout()
+            pad_col.addWidget(pad)
+            krow = QHBoxLayout()
+            for k in (slip, censor, stut):
+                krow.addWidget(k)
+            pad_col.addLayout(krow)
+            perf.addLayout(pad_col)
+            box.addLayout(perf)
+            decks.addWidget(panel)
         body.addWidget(decks)
         body.setSizes([int(self._win_w * 0.35), int(self._win_w * 0.65)])
         root.addWidget(body, 3)
 
-        # 混音台
+        # --- Mixer + Effects 区（底部） ---
+        from ui.beat_fx_widget import BeatFxWidget
+        from ui.vu_meter import VUMeter
+
         mixer = QWidget()
         mix_box = QHBoxLayout(mixer)
+        mix_box.addWidget(QLabel("MIXER"))
+        self._trim_a = self._add_trim_group(mix_box, "A TRIM")
+        self._trim_b = self._add_trim_group(mix_box, "B TRIM")
         self._eq_a_sliders = self._add_eq_group(mix_box, "A EQ")
         self._eq_b_sliders = self._add_eq_group(mix_box, "B EQ")
+        # VU 表 + Fader Start + Tap（每盘）
+        for letter, label in (("a", "A"), ("b", "B")):
+            col = QVBoxLayout()
+            col.addWidget(QLabel(f"{label} VU"))
+            meter = VUMeter(f"{label}")
+            setattr(self, f"_vu_{letter}", meter)
+            col.addWidget(meter)
+            fs = QPushButton(f"{label} FaderStart")
+            fs.setCheckable(True)
+            setattr(self, f"_fs_{letter}", fs)
+            col.addWidget(fs)
+            tap = QPushButton(f"{label} Tap")
+            setattr(self, f"_tap_{letter}", tap)
+            col.addWidget(tap)
+            mix_box.addLayout(col)
         # 横推
         xf_col = QVBoxLayout()
         xf_col.addWidget(QLabel("横推"))
@@ -134,6 +223,13 @@ class MainWindow(QMainWindow):
         self._volume.setValue(100)
         vol_col.addWidget(self._volume)
         mix_box.addLayout(vol_col)
+        # Beat FX 面板（Effects 区）
+        fx_panel = QWidget()
+        fx_box = QVBoxLayout(fx_panel)
+        fx_box.addWidget(QLabel("EFFECTS"))
+        self._beat_fx = BeatFxWidget()
+        fx_box.addWidget(self._beat_fx)
+        mix_box.addWidget(fx_panel)
         # 转场
         self._prepare_btn = QPushButton("Prepare 来曲")
         self._mix_btn = QPushButton("Mix Now")
@@ -165,8 +261,30 @@ class MainWindow(QMainWindow):
         box.addLayout(col)
         return sliders
 
+    def _add_trim_group(self, box: QHBoxLayout, title: str) -> QSlider:
+        # 构建 TRIM 预增益滑块（0-200 映射 0-2）
+        col = QVBoxLayout()
+        col.addWidget(QLabel(title))
+        s = QSlider(Qt.Horizontal)
+        s.setRange(0, 200)
+        s.setValue(100)
+        col.addWidget(s)
+        box.addLayout(col)
+        return s
+
+    def _add_perf_key(self, name: str) -> QPushButton:
+        # 构建表演功能键（Slip/Censor/Stutter；Censor 为按住语义）
+        btn = QPushButton(name)
+        if name == "Censor":
+            btn.setCheckable(True)  # 按住=按下期间
+        else:
+            btn.setCheckable(True)
+        return btn
+
     def _connect_signals(self) -> None:
         # 连接信号：按钮/滑块 → 引擎/转场；表格双击 → 加载到目标盘
+        self._load_a_btn.clicked.connect(lambda: self._load_selected_to("a"))
+        self._load_b_btn.clicked.connect(lambda: self._load_selected_to("b"))
         self._open_btn.clicked.connect(self._open_folder)
         self._target_btn.clicked.connect(self._toggle_target)
         self._search.textChanged.connect(self._filter_table)
@@ -177,6 +295,8 @@ class MainWindow(QMainWindow):
             lambda v: self._engine.crossfader.set_position(v / 100.0)
         )
         self._volume.valueChanged.connect(lambda v: self._engine.set_volume(v / 100.0))
+        # E2.1 SHIFT：按钮与键盘共用状态
+        self._shift_btn.toggled.connect(self._shift.set_active)
         for deck_letter, widget in (
             ("a", self.deck_widget_a),
             ("b", self.deck_widget_b),
@@ -192,6 +312,50 @@ class MainWindow(QMainWindow):
             widget.pitch_changed.connect(lambda v, d=deck: self._on_pitch(d, v))
         self._connect_eq(self._eq_a_sliders, self._engine.deck_a)
         self._connect_eq(self._eq_b_sliders, self._engine.deck_b)
+        # --- E2 信号接线 ---
+        # TRIM / VU / Fader Start / Tap
+        self._trim_a.valueChanged.connect(
+            lambda v: self._engine.deck_a.set_pregain(v / 100.0)
+        )
+        self._trim_b.valueChanged.connect(
+            lambda v: self._engine.deck_b.set_pregain(v / 100.0)
+        )
+        self._fs_a.toggled.connect(self._engine.set_fader_start)
+        self._tap_a.clicked.connect(lambda: self._on_tap("a"))
+        self._tap_b.clicked.connect(lambda: self._on_tap("b"))
+        # Jog（每盘）
+        for letter, jog, deck in (
+            ("a", self.jog_a, self._engine.deck_a),
+            ("b", self.jog_b, self._engine.deck_b),
+        ):
+            jog.bend_changed.connect(lambda v, d=deck: d.jog_bend(v))
+            jog.bend_changed.connect(lambda v: self._on_bend_release(v))
+            jog.search_changed.connect(lambda v, d=deck: d.jog_search(v))
+            jog.search_changed.connect(lambda v: self._on_search_release(v))
+            jog.scratch_moved.connect(lambda s, d=deck: d.jog_scratch(s))
+            jog.touch_changed.connect(lambda on, d=deck: d.jog_touch(on))
+            jog.vinyl_toggled.connect(
+                lambda on, letter=letter: self._on_vinyl(letter, on)
+            )
+        # Pad（每盘）
+        for letter, pad, deck in (
+            ("a", self.pad_a, self._engine.deck_a),
+            ("b", self.pad_b, self._engine.deck_b),
+        ):
+            pad.pad_clicked.connect(
+                lambda idx, mode, d=deck, l=letter: self._on_pad(l, d, idx, mode)
+            )
+        # Beat FX（作用目标盘）
+        self._beat_fx.fx_changed.connect(self._on_beat_fx_fx)
+        self._beat_fx.depth_changed.connect(self._on_beat_fx_depth)
+        self._beat_fx.onoff_changed.connect(self._on_beat_fx_onoff)
+        # 表演键（E2.8）
+        self._slip_btns["a"].toggled.connect(self._engine.deck_a.slip_toggle)
+        self._slip_btns["b"].toggled.connect(self._engine.deck_b.slip_toggle)
+        self._censor_btns["a"].toggled.connect(self._engine.deck_a.censor)
+        self._censor_btns["b"].toggled.connect(self._engine.deck_b.censor)
+        for letter, deck in (("a", self._engine.deck_a), ("b", self._engine.deck_b)):
+            self._stutter_btns[letter].clicked.connect(deck.stutter)
 
     def _connect_eq(self, sliders: dict, deck) -> None:
         # 连接一组 EQ 滑块到指定盘的三频 setter
@@ -273,8 +437,46 @@ class MainWindow(QMainWindow):
             )
             self._table.setRowHidden(row, not visible)
 
+    def _load_track_to(self, letter: str, path: str, entry: dict) -> None:
+        # 加载曲目到指定盘（解码+播放+波形+元数据；异常捕获不崩溃）
+        try:
+            audio = self._engine.load_audio(path)
+        except Exception as exc:
+            _logger.error("加载失败 %s: %s", path, exc)
+            self._status(f"加载失败: {Path(path).name}")
+            return
+        deck = getattr(self._engine, f"deck_{letter}")
+        deck.play(audio)
+        deck.set_tempo(entry["bpm"])
+        widget = getattr(self, f"deck_widget_{letter}")
+        widget.set_track(path, entry["bpm"], entry["key"], audio)
+        widget.set_playing_state(True)
+        self._deck_meta[letter] = {
+            "path": path,
+            "bpm": entry["bpm"],
+            "key": entry["key"],
+            "downbeats": list(entry["record"].get("downbeats", [])),
+        }
+        self._status(f"已加载到 DECK {letter.upper()}: {Path(path).name}")
+
+    def _load_selected_to(self, letter: str) -> None:
+        # LOAD A/B 按钮（E3，FLX4 语义）：加载当前选中曲目到指定盘
+        row = self._table.currentRow()
+        if row < 0:
+            self._status("请先选中曲目")
+            return
+        path_item = self._table.item(row, 0)
+        if path_item is None:
+            return
+        path = path_item.data(Qt.UserRole)
+        entry = next((e for e in self._library if e["path"] == path), None)
+        if entry is None:
+            return
+        self._load_track_to(letter, path, entry)
+
     def _on_row_double_clicked(self, item) -> None:
         # 双击行 → 加载到目标盘（解码 + 播放 + 波形 + 元数据；异常捕获不崩溃）
+        # E2.6：500ms 内同路径再次加载 = Instant Doubles（复制到另一盘同位置播放）
         if item is None:
             return
         path_item = self._table.item(item.row(), 0)
@@ -284,25 +486,36 @@ class MainWindow(QMainWindow):
         entry = next((e for e in self._library if e["path"] == path), None)
         if entry is None:
             return
-        try:
-            audio = self._engine.load_audio(path)
-        except Exception as exc:
-            _logger.error("加载失败 %s: %s", path, exc)
-            self._status(f"加载失败: {Path(path).name}")
+        import time as _time
+
+        now = _time.time()
+        if self._last_load[0] == path and now - self._last_load[1] < 0.5:
+            # Instant Doubles：加载到另一盘（非目标盘）同位置
+            other = "b" if self._target == "a" else "a"
+            other_deck = getattr(self._engine, f"deck_{other}")
+            src_deck = getattr(self._engine, f"deck_{self._target}")
+            try:
+                audio = self._engine.load_audio(path)
+            except Exception as exc:
+                _logger.error("加载失败 %s: %s", path, exc)
+                return
+            other_deck.play(audio)
+            other_deck._position = src_deck.position  # 同位置
+            other_widget = getattr(self, f"deck_widget_{other}")
+            other_widget.set_track(path, entry["bpm"], entry["key"], audio)
+            other_widget.set_playing_state(True)
+            self._deck_meta[other] = {
+                "path": path,
+                "bpm": entry["bpm"],
+                "key": entry["key"],
+                "downbeats": list(entry["record"].get("downbeats", [])),
+            }
+            self._last_load = (None, 0.0)
+            self._status(f"Instant Doubles → DECK {other.upper()}")
             return
-        deck = getattr(self._engine, f"deck_{self._target}")
-        deck.play(audio)
-        widget = getattr(self, f"deck_widget_{self._target}")
-        widget.set_track(path, entry["bpm"], entry["key"], audio)
-        widget.set_playing_state(True)
-        self._deck_meta[self._target] = {
-            "path": path,
-            "bpm": entry["bpm"],
-            "key": entry["key"],
-            "downbeats": list(entry["record"].get("downbeats", [])),
-        }
+        self._last_load = (path, now)
+        self._load_track_to(self._target, path, entry)
         self._tm.mark_stale()
-        self._status(f"已加载到 DECK {self._target.upper()}: {Path(path).name}")
 
     # --- 打碟机控制（D4.2 信号连接） ---
 
@@ -380,15 +593,133 @@ class MainWindow(QMainWindow):
         else:
             self._status("Mix 被拒：无预备缓冲或状态不允许")
 
+    # --- E2 处理器 ---
+
+    def _on_tap(self, letter: str) -> None:
+        # Tap BPM：调用盘 tap 并显示 BPM
+        deck = getattr(self._engine, f"deck_{letter}")
+        bpm = deck.tap()
+        if bpm > 0:
+            self._status(f"DECK {letter.upper()} Tap BPM: {bpm:.1f}")
+
+    def _on_bend_release(self, v: float) -> None:
+        # 弯音信号发出后延迟归零（简化为立即归零：滚轮一格一次弯音）
+        if abs(v) > 0.01:
+            self._bend_timer_pending = v
+
+    def _on_search_release(self, v: float) -> None:
+        # 搜索信号记录（释放时归零由 jog 自身轮转处理；此处仅占位）
+        pass
+
+    def _on_vinyl(self, letter: str, on: bool) -> None:
+        # Vinyl 模式切换提示
+        self._status(f"DECK {letter.upper()} Vinyl {'开' if on else '关'}")
+
+    def _on_pad(self, letter: str, deck, idx: int, mode: str) -> None:
+        # Pad 按下分发（按模式映射到引擎；SHIFT 时取第二功能）
+        shift = self._shift.is_shift()
+        if mode == "Hot Cue":
+            if shift:
+                deck.hot_cue_clear(idx)
+            elif deck.hot_cue_state(idx)["has"]:
+                deck.hot_cue_play(idx)
+            else:
+                deck.hot_cue_set(idx)
+        elif mode == "Beat Loop":
+            beats = [1, 2, 4, 8, 16, 32][idx % 6]
+            if shift:
+                deck.set_loop(False)
+            else:
+                deck.set_beatloop(beats, deck._bpm or 120.0)
+        elif mode == "Beat Jump":
+            step = [1, 2, 4, 8][idx % 4]
+            direction = -1 if idx < 4 else 1
+            deck.beat_jump(direction * step, align=True)
+        elif mode == "Sampler":
+            if shift:
+                deck.sample_unload(idx)
+            elif deck.sample_state(idx)["loaded"]:
+                deck.sample_play(idx)
+            else:
+                self._status(f"采样槽 {idx + 1} 未载入")
+        elif mode == "Key Shift":
+            semitones = [0, 1, 2, 3, -3, -2, -1, 0][idx]
+            if shift:
+                deck.set_key_shift(deck.key_shift + semitones if semitones else 0)
+            else:
+                deck.set_key_shift(semitones)
+
+    def _apply_beat_fx(self) -> None:
+        # 按面板当前状态应用 Beat FX 到目标盘（效果/深度/开关任一变化时统一调用）
+        deck = getattr(self._engine, f"deck_{self._target}")
+        on = self._beat_fx._onoff.isChecked()
+        if on and self._beat_fx_effect:
+            deck.set_fx(self._beat_fx_effect, self._beat_fx_depth)
+        else:
+            deck.set_fx("", 0.0)
+
+    def _on_beat_fx_fx(self, fx: str) -> None:
+        # Beat FX 效果类型变化：记录并应用
+        self._beat_fx_effect = fx
+        self._apply_beat_fx()
+
+    def _on_beat_fx_depth(self, v: float) -> None:
+        # Beat FX 深度变化：记录并应用
+        self._beat_fx_depth = v
+        self._apply_beat_fx()
+
+    def _on_beat_fx_onoff(self, on: bool) -> None:
+        # Beat FX 开关变化：按状态统一应用（off 时清空）
+        if on and not self._beat_fx_effect:
+            self._beat_fx_effect = "HPF"  # 默认效果
+        self._apply_beat_fx()
+
+    def keyPressEvent(self, event) -> None:
+        # 键盘 SHIFT 驱动全局修饰状态（E2.1）
+        if event.key() == 16777248:  # Qt.Key_Shift
+            self._shift.set_active(True)
+            self._shift_btn.setChecked(True)
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event) -> None:
+        # 键盘 SHIFT 释放
+        if event.key() == 16777248:
+            self._shift.set_active(False)
+            self._shift_btn.setChecked(False)
+        super().keyReleaseEvent(event)
+
     # --- 定时刷新（D4.3 播放头/进度） ---
 
     def _tick(self) -> None:
-        # 100ms 定时器：刷新两盘进度/播放头/播放状态文案
+        # 100ms 定时器：进度/播放头/播放状态 + VU + LED 灯态（E2.5/E2.7）
         for letter, widget in (("a", self.deck_widget_a), ("b", self.deck_widget_b)):
             deck = getattr(self._engine, f"deck_{letter}")
             widget.update_progress(deck.position, deck.duration)
             playing = deck.state.value == "playing" and not deck.paused
             widget.set_playing_state(playing)
+        # VU（E2.5）
+        vu = self._engine.vu_levels()
+        self._vu_a.set_level(vu[0])
+        self._vu_b.set_level(vu[1])
+        # LED（E2.7）
+        for letter, deck in (("a", self._engine.deck_a), ("b", self._engine.deck_b)):
+            pad = self.pad_a if letter == "a" else self.pad_b
+            if pad.mode == "Hot Cue":
+                for i in range(8):
+                    pad.set_pad_light(i, deck.hot_cue_state(i)["has"])
+            elif pad.mode == "Sampler":
+                for i in range(8):
+                    pad.set_pad_light(i, deck.sample_state(i)["loaded"])
+            elif pad.mode == "Key Shift":
+                pad.set_pad_light(0, deck.key_shift == 0)
+                pad.set_pad_light(1, deck.key_shift == 1)
+                pad.set_pad_light(2, deck.key_shift == 2)
+                pad.set_pad_light(3, deck.key_shift >= 3)
+                pad.set_pad_light(4, deck.key_shift == -3)
+                pad.set_pad_light(5, deck.key_shift == -2)
+                pad.set_pad_light(6, deck.key_shift == -1)
+                pad.set_pad_light(7, deck.key_shift == 0)
+            self._slip_btns[letter].setChecked(deck.slip_active)
 
     # --- 其他 ---
 

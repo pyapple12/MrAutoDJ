@@ -114,7 +114,7 @@ MrAutoDJ/
 │   ├── file_utils.py          # JSON 读写（原子写）+ 缓存单例
 │   ├── retry.py               # 泛型重试函数（指数退避）
 │   └── convert.py             # 弹性类型转换（宽容解析）
-├── reference/                 # 参考仓库（外部 clone，不纳入版本控制）
+├── .reference/                # 参考仓库与硬件资料（外部 clone，不纳入版本控制）
 ├── tools/rubberband/          # 内置变速引擎（GPL 便携构建，兜底方案，随仓库分发）
 ├── requirements.txt           # Python 依赖列表
 ├── LICENSE                    # MIT 许可证
@@ -163,7 +163,7 @@ Pitch 变速与 Keylock（变调不变速）依赖 Rubber Band 变速引擎。�
 
 ## 参考项目
 
-`reference/` 目录存放开源 DJ 软件的浅克隆，研读结论见 `w.study.md`：
+`.reference/` 目录存放开源 DJ 软件的浅克隆与硬件资料，研读结论见 `w.study.md`：
 
 - **引擎**：songs-automixer_python（TUI 自动混音台）、pyCrossfade（离线混音库）
 - **AI 编排**：ai-remixmate、automix、dj-track-similarity、cuekey

@@ -1,5 +1,4 @@
 # 变速/变调预渲染模块：rubberband CLI 封装（唯一调用点）
-# 参考：reference/dj-engine/songs-automixer_python/automix/stretcher.py（完整照抄+变调扩展）
 
 from __future__ import annotations
 
