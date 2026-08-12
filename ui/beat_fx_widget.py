@@ -1,5 +1,4 @@
 # Beat FX 面板：通道选择 + 效果类型 + 拍数 ± + BPM Auto/Tap + LEVEL/DEPTH
-# 参考：w.study.md B13-5（Effects 区 6 部件）、M1.6 布局规格单
 # F6.4 改版：全按钮 → GlowButton、效果下拉 → 互斥按钮组、拍数 → MiniDisplay、
 #   DEPTH 滑块 → RotaryKnob
 
@@ -11,6 +10,11 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from ui.widgets.glow_button import GlowButton
 from ui.widgets.mini_display import MiniDisplay
 from ui.widgets.rotary_knob import RotaryKnob
+
+# 静态配置解包（配色 token，G2.2）
+from config.static.static_config import get_static_config
+
+_UI = get_static_config().ui
 
 # 效果库（E1.8 引擎实现 + 既有）
 FX_TYPES = ["HPF", "LPF", "Trans", "Echo", "Delay"]
@@ -111,7 +115,9 @@ class BeatFxWidget(QWidget):
         # 效果互斥选择（橙色 LED 标识当前效果）
         for name, btn in self._fx_buttons.items():
             btn.setChecked(name == fx)
-            btn.set_led(name == fx, "#ff7a2f" if name == fx else None)
+            btn.set_led(
+                name == fx, _UI.get("glow_orange", "#ff7a2f") if name == fx else None
+            )
         self.fx_changed.emit(fx)
 
     def _select_channel(self, ch: str) -> None:

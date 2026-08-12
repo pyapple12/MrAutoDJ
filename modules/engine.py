@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import threading
+import time
 from enum import Enum
-from typing import Optional
 
 import numpy as np
 import sounddevice as sd
@@ -18,11 +18,31 @@ SAMPLE_RATE = int(_SC.base.get("sample_rate", 44100))
 CHANNELS = int(_SC.base.get("channels", 2))
 BLOCK_SIZE = int(_SC.base.get("block_size", 2048))
 
-# 主增益上限（+6dB boost 能力；输出硬限幅 ±1.0 保护设备，B1 约定）
-MAX_GAIN = 2.0
+# 主增益上限（+6dB boost 能力；输出硬限幅 ±1.0 保护设备，配置驱动 G2.1）
+MAX_GAIN = float(_SC.base.get("max_gain", 2.0))
 
 # VU 电平环形缓冲长度（每盘；回调每块写一个峰值，UI 定时器读最近值）
-VU_BUFFER = 32
+VU_BUFFER = int(_SC.base.get("vu_buffer", 32))
+
+# 三频 EQ 参数（G2.1）：频率 [低/中/高] Hz；增益斜率 [提升 dB, 衰减 dB]
+EQ_FREQS = [float(f) for f in _SC.base.get("eq_freqs", [100.0, 1000.0, 10000.0])]
+EQ_GAIN_DB = [float(g) for g in _SC.base.get("eq_gain_db", [6.0, -30.0])]
+
+# 槽位上限（Hot Cue / Sampler，每盘；配置驱动 G2.1）
+SLOT_COUNT = int(_SC.base.get("slot_count", 8))
+
+# Jog 弯音/搜索钳制（配置驱动 G2.1）
+JOG_BEND_MAX = float(_SC.base.get("jog_bend_max", 0.5))
+JOG_SEARCH_MAX = float(_SC.base.get("jog_search_max", 16.0))
+
+# 效果预置（Echo/Delay 参数，配置驱动 G2.1）
+ECHO_PRESET = dict(_SC.base.get("fx_echo", {"delay": 0.25, "feedback": 0.6, "taps": 1}))
+DELAY_PRESET = dict(
+    _SC.base.get("fx_delay", {"delay": 0.375, "feedback": 0.4, "taps": 3})
+)
+
+# Key Shift 半音上限（±key_shift_max，G1.3：transition_manager 共用，配置驱动）
+_KEY_SHIFT_MAX = int(_SC.base.get("key_shift_max", 12))
 
 
 class State(Enum):
@@ -177,29 +197,41 @@ class DeckEQ:
     def set_low(self, amt: float) -> None:
         # 低段旋钮 [-1,1]：系数在 UI 线程算（-30dB..+6dB 映射），回调只跑差分
         self.low_amt = float(np.clip(amt, -1.0, 1.0))
-        gain = 6.0 * self.low_amt if self.low_amt >= 0 else -30.0 * abs(self.low_amt)
+        gain = (
+            EQ_GAIN_DB[0] * self.low_amt
+            if self.low_amt >= 0
+            else EQ_GAIN_DB[1] * abs(self.low_amt)
+        )
         if abs(self.low_amt) < 0.01:
             self.low._set_coeffs(None, None)
         else:
-            self.low.low_shelf(gain, 100.0)
+            self.low.low_shelf(gain, EQ_FREQS[0])
 
     def set_mid(self, amt: float) -> None:
         # 中段旋钮（同 set_low 语义）
         self.mid_amt = float(np.clip(amt, -1.0, 1.0))
-        gain = 6.0 * self.mid_amt if self.mid_amt >= 0 else -30.0 * abs(self.mid_amt)
+        gain = (
+            EQ_GAIN_DB[0] * self.mid_amt
+            if self.mid_amt >= 0
+            else EQ_GAIN_DB[1] * abs(self.mid_amt)
+        )
         if abs(self.mid_amt) < 0.01:
             self.mid._set_coeffs(None, None)
         else:
-            self.mid.peaking(gain, 1000.0)
+            self.mid.peaking(gain, EQ_FREQS[1])
 
     def set_high(self, amt: float) -> None:
         # 高段旋钮（同 set_low 语义）
         self.high_amt = float(np.clip(amt, -1.0, 1.0))
-        gain = 6.0 * self.high_amt if self.high_amt >= 0 else -30.0 * abs(self.high_amt)
+        gain = (
+            EQ_GAIN_DB[0] * self.high_amt
+            if self.high_amt >= 0
+            else EQ_GAIN_DB[1] * abs(self.high_amt)
+        )
         if abs(self.high_amt) < 0.01:
             self.high._set_coeffs(None, None)
         else:
-            self.high.high_shelf(gain, 10000.0)
+            self.high.high_shelf(gain, EQ_FREQS[2])
 
     def reset(self) -> None:
         # 全部滤波器状态清零（换曲时调用）
@@ -269,19 +301,28 @@ class FeedbackDelay:
 
 
 class Echo(FeedbackDelay):
-    # Echo：短延迟（250ms）+ 高反馈（0.6），经典回声
+    # Echo：短延迟（250ms）+ 高反馈（0.6），经典回声（参数配置驱动 G2.1）
     def __init__(self, sr: int):
         # 初始化反馈延迟线并配置 Echo 参数
         super().__init__(sr)
-        self.configure(0.25, 0.6)
+        self.configure(
+            ECHO_PRESET["delay"],
+            ECHO_PRESET["feedback"],
+            n_taps=int(ECHO_PRESET.get("taps", 1)),
+        )
 
 
 class Delay(FeedbackDelay):
     # Delay：长延迟（0.375s≈120BPM 八分音符）+ 中反馈（0.4）+ 3 tap
+    # （参数配置驱动 G2.1）
     def __init__(self, sr: int):
         # 初始化反馈延迟线并配置 Delay 参数
         super().__init__(sr)
-        self.configure(0.375, 0.4, n_taps=3)
+        self.configure(
+            DELAY_PRESET["delay"],
+            DELAY_PRESET["feedback"],
+            n_taps=int(DELAY_PRESET.get("taps", 3)),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -296,13 +337,13 @@ class Deck:
         self._lock = lock
         self.sr = sr
         self.state = State.IDLE
-        self._now_audio: Optional[np.ndarray] = None
-        self._next_audio: Optional[np.ndarray] = None
+        self._now_audio: np.ndarray | None = None
+        self._next_audio: np.ndarray | None = None
         self._position: int = 0
         self._mix_pos: int = 0
         self._fade_samples: int = 0
         self._paused: bool = False
-        self._pending_mix_at: Optional[int] = None
+        self._pending_mix_at: int | None = None
         self._cue_sample: int = 0
         self._loop_active: bool = False
         self._loop_start: int = 0
@@ -325,7 +366,6 @@ class Deck:
         self._jog_touched: bool = False
         self._jog_bend_rate: float = 0.0
         self._jog_search_rate: float = 0.0
-        self._last_out_pos: int = -1  # 上次触摸输出位置（手停判定，P3）
         self._scratch_pending: int = 0  # 未消费的搓碟位移（平滑刮擦队列）
         self._scratch_fpos: float = 0.0  # 搓碟浮点播放位置（逐帧渐变）
         # Slip 模式：真实位置暗中推进，播放位置（_position）可被搓碟自由移动
@@ -333,9 +373,9 @@ class Deck:
         self._slip_actual: int = 0
         # Sampler：8 槽音频 + 当前播放 (slot, pos)
         self._samples: dict[int, np.ndarray] = {}
-        self._sample_playing: Optional[tuple] = None
+        self._sample_playing: tuple[int, int] | None = None
         # Tap BPM：时间戳队列（秒）
-        self._tap_times: list = []
+        self._tap_times: list[float] = []
         # Censor：按住期间反向播放
         self._reverse: bool = False
         # Trans 门控相位（跨块持续）
@@ -405,13 +445,17 @@ class Deck:
     def hot_cue_set(self, slot: int) -> None:
         # 存储当前位置到热 CUE 槽（0-7；越界忽略）
         with self._lock:
-            if 0 <= slot < 8:
+            if 0 <= slot < SLOT_COUNT:
                 self._hot_cues[slot] = self._position
 
     def hot_cue_play(self, slot: int) -> None:
         # 跳转到热 CUE 槽并播放（无音频/槽空忽略）
         with self._lock:
-            if 0 <= slot < 8 and slot in self._hot_cues and self._now_audio is not None:
+            if (
+                0 <= slot < SLOT_COUNT
+                and slot in self._hot_cues
+                and self._now_audio is not None
+            ):
                 self._position = min(self._hot_cues[slot], len(self._now_audio))
                 self._paused = False
                 if self.state == State.IDLE:
@@ -421,7 +465,7 @@ class Deck:
     def hot_cue_clear(self, slot: int) -> None:
         # 清除热 CUE 槽（越界忽略）
         with self._lock:
-            if 0 <= slot < 8:
+            if 0 <= slot < SLOT_COUNT:
                 self._hot_cues.pop(slot, None)
 
     def hot_cue_state(self, slot: int) -> dict:
@@ -437,12 +481,16 @@ class Deck:
         with self._lock:
             self._bpm = max(0.0, float(bpm))
 
+    def _beat_len(self, bpm: float) -> int:
+        # 拍长换算（样本数）：60/bpm×sr（G1.3：beat_jump/set_beatloop 共用）
+        return int(60.0 / bpm * self.sr)
+
     def beat_jump(self, beats: int, align: bool = False) -> None:
         # 按拍跳转：±beats 拍；align=True（Skip 模式）时先对齐最近拍边界
         with self._lock:
             if self._now_audio is None or self._bpm <= 0:
                 return
-            beat_len = int(60.0 / self._bpm * self.sr)
+            beat_len = self._beat_len(self._bpm)
             target = self._position + beats * beat_len
             if align:
                 target = target - (target % beat_len)
@@ -451,9 +499,9 @@ class Deck:
     # --- E1.3 Key Shift 半音 ---
 
     def set_key_shift(self, semitones: int) -> None:
-        # 设置 Key Shift（钳制 ±12；仅存状态，实际变调渲染由预渲染管线执行）
+        # 设置 Key Shift（钳制 ±key_shift_max；仅存状态，实际变调渲染由预渲染管线执行）
         with self._lock:
-            self._key_shift = max(-12, min(12, int(semitones)))
+            self._key_shift = max(-_KEY_SHIFT_MAX, min(_KEY_SHIFT_MAX, int(semitones)))
 
     @property
     def key_shift(self) -> int:
@@ -481,14 +529,16 @@ class Deck:
             self._scratch_pending += int(delta_samples)
 
     def jog_bend(self, rate: float) -> None:
-        # 弯音：临时播放速率偏移（±0.5；0=恢复原速）
+        # 弯音：临时播放速率偏移（±JOG_BEND_MAX；0=恢复原速）
         with self._lock:
-            self._jog_bend_rate = max(-0.5, min(0.5, float(rate)))
+            self._jog_bend_rate = max(-JOG_BEND_MAX, min(JOG_BEND_MAX, float(rate)))
 
     def jog_search(self, rate: float) -> None:
-        # SHIFT 高速搜索：速率倍数（±16；0=停止）
+        # SHIFT 高速搜索：速率倍数（±JOG_SEARCH_MAX；0=停止）
         with self._lock:
-            self._jog_search_rate = max(-16.0, min(16.0, float(rate)))
+            self._jog_search_rate = max(
+                -JOG_SEARCH_MAX, min(JOG_SEARCH_MAX, float(rate))
+            )
 
     # --- E1.6 Slip 模式 ---
 
@@ -512,7 +562,7 @@ class Deck:
     def sample_load(self, slot: int, audio: np.ndarray) -> None:
         # 载入采样到槽位（0-7；停止当前播放并替换）
         with self._lock:
-            if 0 <= slot < 8 and audio is not None and len(audio) > 0:
+            if 0 <= slot < SLOT_COUNT and audio is not None and len(audio) > 0:
                 self._samples[slot] = audio
                 if self._sample_playing is not None and self._sample_playing[0] == slot:
                     self._sample_playing = None
@@ -520,7 +570,7 @@ class Deck:
     def sample_play(self, slot: int) -> None:
         # 播放槽位采样（若已在播则从头重播；只同时播一个）
         with self._lock:
-            if 0 <= slot < 8 and slot in self._samples:
+            if 0 <= slot < SLOT_COUNT and slot in self._samples:
                 self._sample_playing = (slot, 0)
 
     def sample_stop(self, slot: int) -> None:
@@ -532,7 +582,7 @@ class Deck:
     def sample_unload(self, slot: int) -> None:
         # 卸载槽位采样（同时停止播放）
         with self._lock:
-            if 0 <= slot < 8:
+            if 0 <= slot < SLOT_COUNT:
                 self._samples.pop(slot, None)
                 if self._sample_playing is not None and self._sample_playing[0] == slot:
                     self._sample_playing = None
@@ -550,8 +600,6 @@ class Deck:
 
     def tap(self) -> float:
         # Tap BPM：记录时间戳，用最近间隔中值算 BPM（返回 0 表示样本不足）
-        import time
-
         with self._lock:
             now = time.time()
             self._tap_times.append(now)
@@ -602,7 +650,7 @@ class Deck:
         with self._lock:
             if self._now_audio is None or bpm <= 0:
                 return
-            beat_len = int(60.0 / bpm * self.sr)
+            beat_len = self._beat_len(bpm)
             self._loop_start = self._position - (self._position % beat_len)
             self._loop_end = min(
                 len(self._now_audio), self._loop_start + beats * beat_len
@@ -622,7 +670,7 @@ class Deck:
         self,
         next_audio: np.ndarray,
         fade_seconds: float,
-        scheduled_start_sample: Optional[int] = None,
+        scheduled_start_sample: int | None = None,
     ) -> None:
         # 混入下一段音频：fade 秒交叉淡化；scheduled_start_sample 指定时在到达该
         # 样本的同一音频帧内切换（样本级精确，无静音缝隙，M2 对拍基础）
@@ -630,7 +678,8 @@ class Deck:
             if self.state != State.PLAYING:
                 return
             self._next_audio = next_audio
-            self._fade_samples = int(fade_seconds * self.sr)
+            # G0.3：fade_seconds<=0 时钳制为 1 样本（防 _fill_mixing 除零静音）
+            self._fade_samples = max(1, int(fade_seconds * self.sr))
             self._mix_pos = 0
             if (
                 scheduled_start_sample is None
@@ -742,19 +791,16 @@ class Deck:
                 self._position = max(0, self._position - step)
                 out[:] = self._get_chunk_reverse(frames)
                 return
+            # G0.2：正向搜索 step<frames（|rate|<1）时复用插值防形状错误
+            self._fill_resample(out, frames, step)
+            self._position += step
+            self._mix_sample(out)
+            if not self._loop_active and self._position >= len(self._now_audio):
+                self.state = State.IDLE
+            return
         elif self._jog_bend_rate != 0.0:
             step = int(round(frames * (1.0 + self._jog_bend_rate)))
-            if step != frames:
-                # 弯音变速：step 样本线性插值到 frames（防 step<frames 形状
-                # 错误致静音卡顿，且块内变速更平滑；分配取舍见文件尾说明）
-                src = self._get_chunk(step)
-                idx = np.linspace(0.0, step - 1.0, frames)
-                i0 = idx.astype(np.int64)
-                i1 = np.minimum(i0 + 1, step - 1)
-                w = (idx - i0).astype(np.float32)[:, None]
-                out[:] = src[i0] * (1.0 - w) + src[i1] * w
-            else:
-                out[:] = self._get_chunk(frames)
+            self._fill_resample(out, frames, step)
             self._position += step
             # Sampler 叠加（在 EQ 前混入采样）
             self._mix_sample(out)
@@ -774,6 +820,20 @@ class Deck:
 
         if not self._loop_active and self._position >= len(self._now_audio):
             self.state = State.IDLE
+
+    def _fill_resample(self, out: np.ndarray, frames: int, step: int) -> None:
+        # 变速填充（弯音/搜索共用，G0.2）：step 样本线性插值到 frames——
+        # 防 step<frames 形状错误致静音卡顿（减速），且块内变速更平滑；
+        # step==frames 直通无开销
+        if step == frames:
+            out[:] = self._get_chunk(frames)
+            return
+        src = self._get_chunk(step)
+        idx = np.linspace(0.0, step - 1.0, frames)
+        i0 = idx.astype(np.int64)
+        i1 = np.minimum(i0 + 1, step - 1)
+        w = (idx - i0).astype(np.float32)[:, None]
+        out[:] = src[i0] * (1.0 - w) + src[i1] * w
 
     def _scratch_fill(self, out: np.ndarray, frames: int) -> None:
         # 平滑刮擦填充（P3 增强）：把未消费的搓碟位移在块内逐帧均匀渐变
@@ -808,7 +868,6 @@ class Deck:
         out[:] = audio[i0] * (1.0 - frac) + audio[i1] * frac
         self._scratch_fpos = fpos + pending
         self._position = max(0, min(int(round(self._scratch_fpos)), len(audio)))
-        self._last_out_pos = self._position
 
     def _fill_mixing(self, out: np.ndarray, frames: int) -> None:
         # 交叉淡化填充：逐帧线性渐变（可叠加等功率由外层调用方换算）
@@ -915,9 +974,13 @@ class Deck:
             else:
                 self._fx_filter = Biquad(self.sr)
             if effect == "Echo":
-                self._fx_delay.configure(0.25, 0.3 + 0.4 * depth)
+                self._fx_delay.configure(ECHO_PRESET["delay"], 0.3 + 0.4 * depth)
             elif effect == "Delay":
-                self._fx_delay.configure(0.375, 0.2 + 0.3 * depth, n_taps=3)
+                self._fx_delay.configure(
+                    DELAY_PRESET["delay"],
+                    0.2 + 0.3 * depth,
+                    n_taps=int(DELAY_PRESET.get("taps", 3)),
+                )
 
     def _apply_fx(self, out: np.ndarray) -> None:
         # Beat FX 执行（回调内；depth=0 旁通）
@@ -963,7 +1026,7 @@ class Crossfader:
         # 当前横推位置
         return self._position
 
-    def get_gains(self) -> tuple:
+    def get_gains(self) -> tuple[float, float]:
         # 计算左右盘增益（theta=0→全左，theta=π/2→全右；中点等功率 √2/2）
         theta = (self._position + 1.0) / 2.0 * (np.pi / 2.0)
         if self.curve == "linear":
@@ -1006,7 +1069,7 @@ class AudioEngine:
 
     # --- E1.5 VU 电平 ---
 
-    def vu_levels(self) -> list:
+    def vu_levels(self) -> list[float]:
         # 当前两盘峰值电平（UI 定时器读取；最近槽位）
         with self._lock:
             idx = (self._vu_idx - 1) % VU_BUFFER
@@ -1056,18 +1119,10 @@ class AudioEngine:
     # --- 解码（D2.2） ---
 
     def load_audio(self, path: str) -> np.ndarray:
-        # 解码任意 ffmpeg 支持格式为 (N,2) float32 @44100；按位深动态归一化
-        # （16-bit PCM /32768；32-bit float wav 解码为 int32 /2^31，B1 只处理了 16-bit）
-        from pydub import AudioSegment
+        # 解码任意 ffmpeg 支持格式为 (N,2) float32 @44100（G1.1：复用 utils 统一解码）
+        from utils.audio_decode import decode_audio
 
-        seg = AudioSegment.from_file(path)
-        seg = seg.set_channels(CHANNELS).set_frame_rate(SAMPLE_RATE)
-        raw = np.array(seg.get_array_of_samples(), dtype=np.float32)
-        if seg.sample_width <= 2:
-            norm = 32768.0
-        else:
-            norm = float(2 ** (8 * seg.sample_width - 1))
-        return raw.reshape(-1, CHANNELS) / norm
+        return decode_audio(path, CHANNELS, SAMPLE_RATE)
 
     # --- 关闭 ---
 
@@ -1141,7 +1196,7 @@ class CuePlayer:
     def __init__(self, device, samplerate: int = SAMPLE_RATE, channels: int = CHANNELS):
         # 初始化独立流（PortAudioError 回退设备采样率）；失败置 is_dead
         self._lock = threading.Lock()
-        self._audio: Optional[np.ndarray] = None
+        self._audio: np.ndarray | None = None
         self._pos: int = 0
         self._playing: bool = False
         self._dead: bool = False
@@ -1253,37 +1308,52 @@ class CuePlayer:
 
 
 # ===== modules/engine.py 模块说明 =====
-# 模块级常量：
-#   _SC：静态配置单例；SAMPLE_RATE=44100 / CHANNELS=2 / BLOCK_SIZE=2048（base.json）
-#   MAX_GAIN=2.0：主增益上限（boost 输出硬限幅 ±1.0）
+# 模块级常量（G3.3 同步：全部配置驱动 base.json）：
+#   _SC：静态配置单例；SAMPLE_RATE=44100 / CHANNELS=2 / BLOCK_SIZE=2048
+#   MAX_GAIN=2.0（max_gain）：主增益上限（boost 输出硬限幅 ±1.0）
+#   VU_BUFFER=32（vu_buffer）：VU 峰值环形缓冲长度
+#   EQ_FREQS=[100,1k,10k] / EQ_GAIN_DB=[6,-30]（eq_freqs/eq_gain_db）：三频 EQ 参数
+#   SLOT_COUNT=8（slot_count）：Hot Cue/Sampler 槽位上限
+#   JOG_BEND_MAX=0.5 / JOG_SEARCH_MAX=16（jog_bend_max/jog_search_max）：钳制
+#   ECHO_PRESET / DELAY_PRESET（fx_echo/fx_delay）：效果预置
+#   _KEY_SHIFT_MAX=12（key_shift_max）：Key Shift 钳制（transition_manager 共用）
 # 类型：
 #   State(Enum)：IDLE/PLAYING/MIXING（B1 状态机）
 #   Biquad：RBJ 双二阶（低架/高架/峰形；系数 setter 算、回调只跑差分；zi 持久）
 #   DeckEQ：三频 EQ（low/mid/high 旋钮 [-1,1]，0=unity，-1=-30dB 全切）
+#   FeedbackDelay/Echo/Delay：反馈延迟线（环形缓冲 + 多 tap；Echo 短延迟高反馈、
+#     Delay 长延迟多 tap；P1 修复后恒从块头读取，零初始化提供初始静默）
 #   Deck：单打碟机（状态机/CUE/循环/混音/EQ；锁由引擎传入共享）
 #   Crossfader：横推（-1..1，常量功率或线性曲线）
 #   AudioEngine：主引擎（双 deck + 横推 + 主音量 + 回调 fail-soft）
 #   CuePlayer：耳机监听（独立流/锁/缓冲；故障 is_dead 静默）
 # 函数（D2 编号）：
 #   D2.1 AudioEngine.__init__（常驻流+锁+状态机+预分配缓冲）
-#   D2.2 load_audio（pydub 解码 (N,2) float32 /32768）
+#   D2.2 load_audio（G1.1 复用 utils/audio_decode.py 统一解码）
 #   D2.3 Deck.play/pause/stop（状态迁移+EQ reset）
-#   D2.4 Deck._fill_playing（取块/补零/自然结尾置 IDLE/循环回绕）
-#   D2.5 Deck.start_mix/_fill_mixing（样本级定时切歌 + 逐帧交叉淡化）
+#   D2.4 Deck._fill_playing（取块/补零/自然结尾置 IDLE/循环回绕；
+#     弯音/搜索经 _fill_resample 变速插值，触摸锁定经 _scratch_fill 平滑刮擦）
+#   D2.5 Deck.start_mix/_fill_mixing（样本级定时切歌 + 逐帧交叉淡化；
+#     fade 钳制 ≥1 防除零）
 #   D2.6 交叉淡化线性渐变（等功率由外层曲线换算，见 Crossfader）
 #   D2.7 DeckEQ（RBJ 三频；系数/处理分离；zi 连续性）
 #   D2.8 Crossfader（常量功率 cos/sin）
 #   D2.9 set_volume（boost 限幅 ±1.0）
 #   D2.10 cue_set/cue_play/cue_set_position
-#   D2.11 set_loop/set_beatloop/set_loop_range（循环回绕）
+#   D2.11 set_loop/set_beatloop/set_loop_range（循环回绕；拍长 _beat_len 共用）
 #   D2.12 modules/transition.py + modules/stretcher.py（转场规划与预渲染）
 #   D2.13 modules/stretcher.py make_keylock_buffer（变调不变速）
 #   D2.14 CuePlayer（独立第二输出，PortAudioError 回退重采样）
 #   D2.15 _callback（try/except 静音降级，绝不抛出）
+#   E1.x jog_touch/jog_scratch/jog_bend/jog_search（触摸锁定 + 平滑刮擦
+#     _scratch_fill：块内逐帧插值变速播放，手停静音）
 # 设计理由：双盘共用一把引擎锁（回调只取一次锁，临界区短）；
-#   预分配中间缓冲满足实时线程零分配纪律；EQ 系数计算隔离在 setter 线程；
-#   监听流完全解耦保证蓝牙/USB 掉线不卡主播放（B1 纪律）
+#   静态外观一次渲染（控件侧）；回调内插值/补零存在小规模 numpy 分配
+#   （linspace/索引数组/补零缓冲，块预算 46ms 内开销 <0.1ms，与弯音/刮擦
+#   仅激活时发生，属可接受的取舍——完整零分配需预分配波形表，留待优化）；
+#   EQ 系数计算隔离在 setter 线程；监听流完全解耦保证蓝牙/USB 掉线不卡主播放
 # 异常处理：回调异常静音降级；解码失败抛异常由上层降级；
 #   监听设备故障 is_dead 静默；音量与旋钮全部钳制
-# 关联配置：config/static/base.json（sample_rate/block_size/channels）；
+# 关联配置：config/static/base.json（sample_rate/block_size/channels/max_gain/
+#   vu_buffer/eq_*/slot_count/jog_*/fx_*/key_shift_max）；
 #   RUBBERBAND_BIN 环境变量（stretcher.py）；transition.py 复用

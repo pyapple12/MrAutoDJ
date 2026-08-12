@@ -1,23 +1,30 @@
 # Jog 转盘控件：外圈滚轮=弯音、顶面按住拖动=搓碟、SHIFT+滚=高速搜索、Vinyl 开关
-# 参考：w.study.md B13-3.16（Jog 交互）、决策记录（双交互结合）
 
 from __future__ import annotations
 
 from PySide6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QCheckBox, QLabel, QVBoxLayout, QWidget
 
 from config.static.static_config import get_static_config
+from ui.widgets._skins import metal_gradient
 
 # 静态配置解包（转盘颜色 + 弯音/搜索/搓碟灵敏度，参数一律走 ui.json）
 _SC = get_static_config()
 _UI_COLORS = _SC.ui.get("colors", {})
+_UI = _SC.ui
 
 # 滚轮/拖动灵敏度（样本数 / 单位；出厂值即合理默认，可在 ui.json 调整）
-WHEEL_BEND_STEP = float(_SC.ui.get("jog_bend_step", 0.05))  # 每格弯音速率（累积）
-SEARCH_WHEEL_STEP = 4.0  # SHIFT+格 高速搜索速率
-SCRATCH_GAIN_BASE = float(_SC.ui.get("jog_scratch_gain", 256))  # 搓碟基础每像素样本
-SCRATCH_SPEED_REF = float(_SC.ui.get("jog_scratch_speed_ref", 800))  # px/s 参考速度
+WHEEL_BEND_STEP = float(_UI.get("jog_bend_step", 0.05))  # 每格弯音速率（累积）
+SEARCH_WHEEL_STEP = float(_UI.get("jog_search_step", 4.0))  # SHIFT+格 搜索速率
+SCRATCH_GAIN_BASE = float(_UI.get("jog_scratch_gain", 256))  # 搓碟基础每像素样本
+SCRATCH_SPEED_REF = float(_UI.get("jog_scratch_speed_ref", 800))  # px/s 参考速度
+
+# 配色 token（G2.2：去硬编码）
+_GLOW_ORANGE = QColor(_UI.get("glow_orange", "#ff7a2f"))
+_GLOW_WHITE = QColor(_UI.get("glow_white", "#e8ecf0"))
+_SILK = QColor(_UI.get("silk_text", "#8a9099"))
+_PANEL_INSET = QColor(_UI.get("panel_inset", "#101215"))
 
 
 class JogWheel(QWidget):
@@ -135,28 +142,24 @@ class JogWheel(QWidget):
         r_in = r_out * 0.66
         bg = QColor(str(_UI_COLORS.get("background", "#0d0d0d")))
         ring = QColor(str(_UI_COLORS.get("accent", "#00ff41")))
-        # 外圈金属渐变环（F6.3）
-        metal = QLinearGradient(0, 0, w, h)
-        metal.setColorAt(0.0, QColor(210, 214, 220))
-        metal.setColorAt(0.5, QColor(150, 154, 160))
-        metal.setColorAt(1.0, QColor(110, 114, 120))
+        # 外圈金属渐变环（G1.2：公共皮肤渐变）
         painter.fillRect(self.rect(), bg)
-        painter.setBrush(metal)
+        painter.setBrush(metal_gradient(0, 0, w, h))
         painter.setPen(QPen(QColor(60, 64, 70), 2))
         painter.drawEllipse(center, r_out, r_out)  # 金属外圈
-        # 顶面（搓碟区）：深灰内盘 + 细分圆
-        painter.setBrush(QColor("#1a1a1a"))
+        # 顶面（搓碟区）：深灰内盘 + 细分圆（G2.2：配色 token）
+        painter.setBrush(_PANEL_INSET)
         painter.setPen(QPen(ring, 2))
         painter.drawEllipse(center, r_in, r_in)
         painter.setPen(QPen(QColor(90, 94, 100), 1))
         painter.drawEllipse(center, r_in * 0.86, r_in * 0.86)
         # 播放指示点（顶部，播放时亮橙色）
         if self._playing:
-            painter.setBrush(QColor("#ff7a2f"))
+            painter.setBrush(_GLOW_ORANGE)
             painter.setPen(Qt.NoPen)
             painter.drawEllipse(QPointF(w / 2, h / 2 - r_in * 0.72), 3, 3)
         # 中心屏文本（BPM/位置）
-        painter.setPen(QColor("#e8ecf0"))
+        painter.setPen(_GLOW_WHITE)
         font = painter.font()
         font.setBold(True)
         font.setPointSizeF(9)
@@ -166,7 +169,7 @@ class JogWheel(QWidget):
             Qt.AlignCenter,
             self._info_text or "JOG",
         )
-        painter.setPen(QColor("#8a9099"))
+        painter.setPen(_SILK)
         painter.drawText(
             QRectF(w / 2 - r_in * 0.7, h / 2 + 4, r_in * 1.4, 12),
             Qt.AlignCenter,
@@ -176,20 +179,23 @@ class JogWheel(QWidget):
 
 
 # ===== ui/jog_wheel.py 模块说明 =====
-# 模块级常量：
-#   WHEEL_BEND_STEP=0.02 / SEARCH_WHEEL_STEP=4.0 / SCRATCH_GAIN=256：
-#     滚轮与拖动的灵敏度标定
+# 模块级常量（G3.3 同步：全部配置驱动，默认值如下）：
+#   WHEEL_BEND_STEP=0.05（ui.json jog_bend_step）每格弯音速率（累积语义）
+#   SEARCH_WHEEL_STEP=4.0（ui.json jog_search_step）SHIFT+格 高速搜索速率
+#   SCRATCH_GAIN_BASE=256 / SCRATCH_SPEED_REF=800（ui.json）：搓碟基础每像素样本与速度参考
 # 类型：
 #   JogWheel(QWidget)：转盘控件
 # 信号：
-#   bend_changed(float)：滚轮弯音（每格 ±0.02，释放时 MainWindow 归零）
-#   search_changed(float)：SHIFT+滚轮高速搜索（每格 ±4）
-#   scratch_moved(int)：拖动搓碟（x 位移 ×256 样本）
-#   touch_changed(bool)：触摸态
-#   vinyl_toggled(bool)：Vinyl 模式开关
+#   bend_changed(float)：滚轮弯音（每格 ±WHEEL_BEND_STEP，MainWindow 累积+定时归零）
+#   search_changed(float)：SHIFT+滚轮高速搜索（每格 ±SEARCH_WHEEL_STEP）
+#   scratch_moved(int)：拖动搓碟（dx × 动态增益 = base×clamp(speed/ref,0.5,3)）
+#   touch_changed(bool)：触摸态；vinyl_toggled(bool)：Vinyl 模式开关
 # 方法：
 #   set_shift_state(shift)：注入全局 SHIFT（E2.1）
+#   set_playing(on)/set_info(text)：中心屏刷新（MainWindow _tick 驱动，F6.3）
+#   _scratch_gain(dx, dt)：速度映射增益（G2 标定）
 #   wheelEvent/mousePressEvent/mouseMoveEvent/mouseReleaseEvent：事件分发
-# 设计理由：FLX4 交互（外圈滚轮=弯音、顶面按住拖动=搓碟，B13-3.16）；
-#   组件零引擎依赖（信号解耦）；paintEvent 圆盘可视化
-# 关联配置：config/static/ui.json（colors）
+# 设计理由：FLX4 交互（外圈滚轮=弯音、顶面按住拖动=搓碟）；
+#   组件零引擎依赖（信号解耦）；paintEvent 圆盘可视化（金属环+中心屏）
+# 关联配置：config/static/ui.json（jog_bend_step/jog_search_step/jog_scratch_*/
+#   glow_orange/glow_white/silk_text/panel_inset）

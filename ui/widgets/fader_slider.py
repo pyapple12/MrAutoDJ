@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
 from config.static.static_config import get_static_config
+from ui.widgets._skins import metal_gradient, metal_pen, top_highlight_pen
 
 # 静态配置解包（推子配色）
 _SC = get_static_config()
@@ -15,7 +16,9 @@ _UI = _SC.ui
 _PANEL_INSET = QColor(_UI.get("panel_inset", "#101215"))
 _PANEL_EDGE = QColor(_UI.get("panel_edge", "#26292f"))
 _SILK = QColor(_UI.get("silk_text", "#8a9099"))
-_TRAVEL = 100.0  # 拖拽像素 → 全程
+WHEEL_STEP_DIVISIONS = int(
+    _UI.get("wheel_step_divisions", 20)
+)  # 滚轮全程等分数（G1.3）
 
 
 class FaderSlider(QWidget):
@@ -86,8 +89,8 @@ class FaderSlider(QWidget):
         event.accept()
 
     def wheelEvent(self, event) -> None:
-        # 滚轮步进：全程 /20
-        step = (self._max - self._min) / 20.0
+        # 滚轮步进：全程 /divisions（G1.3：配置驱动）
+        step = (self._max - self._min) / WHEEL_STEP_DIVISIONS
         self.set_value(self._value + (step if event.angleDelta().y() > 0 else -step))
         event.accept()
 
@@ -128,21 +131,17 @@ class FaderSlider(QWidget):
                 int(groove.left() + groove.width() * 0.5) + 4,
                 int(h / 2.0),
             )
-        # 金属帽（垂直渐变 + 顶部高光棱）
+        # 金属帽（G1.2：公共皮肤渐变 + 描边 + 顶部高光棱）
         r = self._ratio()
         if vertical:
             cap = QRectF(3.0, 2.0 + (h - 16.0) * (1.0 - r), 18.0, 12.0)
         else:
             cap = QRectF(2.0 + (w - 16.0) * r, 3.0, 12.0, 18.0)
-        cap_grad = QLinearGradient(0, cap.top(), 0, cap.bottom())
-        cap_grad.setColorAt(0.0, QColor(200, 204, 210))
-        cap_grad.setColorAt(0.5, QColor(150, 154, 160))
-        cap_grad.setColorAt(1.0, QColor(110, 114, 120))
-        p.setBrush(cap_grad)
-        p.setPen(QPen(QColor(60, 64, 70), 1))
+        p.setBrush(metal_gradient(0, cap.top(), 0, cap.bottom()))
+        p.setPen(metal_pen())
         p.drawRoundedRect(cap, 3, 3)
         # 帽顶高光线
-        p.setPen(QPen(QColor(255, 255, 255, 110), 1))
+        p.setPen(top_highlight_pen())
         if vertical:
             p.drawLine(
                 int(cap.left() + 2),
@@ -168,3 +167,4 @@ class FaderSlider(QWidget):
 # 设计理由：推子"直跳"语义（DJ 台推子点哪到哪，区别于平滑滑杆）；
 #   金属帽渐变模拟拉丝质感（M1.6 规格单）
 # 关联配置：config/static/ui.json（panel_inset/panel_edge/silk_text）
+

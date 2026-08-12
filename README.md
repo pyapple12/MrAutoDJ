@@ -1,6 +1,6 @@
 # MrAutoDJ —— 虚拟 DJ 台与 AI 电台
 
-[![Version](https://img.shields.io/badge/Version-ver%200.22-blue.svg)](config/static/base.json)
+[![Version](https://img.shields.io/badge/Version-ver%200.23-blue.svg)](config/static/base.json)
 [![Python](https://img.shields.io/badge/Python-3.14+-green.svg)](https://www.python.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -134,7 +134,6 @@ MrAutoDJ/
 │   ├── jog_wheel.py           # Jog 转盘（弯音/搓碟/搜索/Vinyl/中心屏）
 │   ├── pad_widget.py          # 打击垫（5 模式 + 灯态）
 │   ├── beat_fx_widget.py      # Beat FX 面板
-│   ├── vu_meter.py            # VU 电平表（旧，已由 LedStrip 替代）
 │   ├── shift_state.py         # 全局 SHIFT 修饰状态
 │   ├── themes.py              # 主题 QSS
 │   └── widgets/               # 拟物原语控件库（QPainter 自绘，零业务依赖）
@@ -155,7 +154,7 @@ MrAutoDJ/
 ├── z.plan.md                  # 项目规划与里程碑
 ├── w.study.md                 # 源码研读报告（含 B13 FLX4 学习报告）
 ├── x.progress.md              # 任务清单（D/E/F 系列）
-├── y.problem.md               # 已知问题记录（P1-P5）
+├── y.problem.md               # 已知问题记录（P1-P4）
 ├── docs/ui_layout.md          # 布局规格单（FLX4 四区 ASCII + 部件表）
 ├── requirements.txt           # Python 依赖列表
 ├── LICENSE                    # MIT 许可证

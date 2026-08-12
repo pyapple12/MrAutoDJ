@@ -58,6 +58,7 @@ def write_json(path: Path, data: Any) -> None:
 
 def clear_cache() -> None:
     # 清空内存缓存单例（文件被外部修改后调用以强制重读）
+    # 状态：暂无调用方（G3.2 审计标注），保留供配置热重载/测试使用
     _json_cache.clear()
 
 

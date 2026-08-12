@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -15,6 +17,11 @@ from PySide6.QtWidgets import (
 
 from ui.waveform_widget import WaveformWidget
 from ui.widgets.glow_button import GlowButton
+
+# 静态配置解包（配色 token，G2.2）
+from config.static.static_config import get_static_config
+
+_UI = get_static_config().ui
 
 
 class DeckWidget(QWidget):
@@ -81,9 +88,7 @@ class DeckWidget(QWidget):
     def set_track(
         self, path: str, bpm: float, key: str, audio: np.ndarray | None
     ) -> None:
-        # 载入曲目：更新信息标签与波形
-        from pathlib import Path
-
+        # 载入曲目：更新信息标签与波形（G3.5：Path 顶层导入）
         name = Path(path).name if path else "未加载"
         bpm_str = f"{bpm:.1f}" if bpm and bpm > 0 else "---"
         self._info_label.setText(f"{self.deck_name}: {name}  |  {bpm_str} BPM  {key}")
@@ -97,9 +102,9 @@ class DeckWidget(QWidget):
         self._progress_label.setText(f"{cur} / {tot}")
 
     def set_playing_state(self, is_playing: bool) -> None:
-        # 播放状态按钮文案与 LED（播放=橙色背光）
+        # 播放状态按钮文案与 LED（播放=橙色背光；G2.2 配色 token）
         self._play_btn.setText("暂停" if is_playing else "播放")
-        self._play_btn.set_led(is_playing, "#ff7a2f")
+        self._play_btn.set_led(is_playing, _UI.get("glow_orange", "#ff7a2f"))
 
     def _on_pitch_changed(self, value: int) -> None:
         # Pitch 滑块变化：更新标签并发信号（百分比）

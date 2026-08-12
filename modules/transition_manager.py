@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Callable, Optional
+from typing import Callable
 
 import numpy as np
 
@@ -17,13 +17,16 @@ from modules.transition import TransitionPlan, plan_transition
 # 静态配置解包（对齐点余量：下拍触发前的最短提前量，秒）
 _SC = get_static_config()
 
+# Key Shift 半音上限（G1.3：与 engine 共用同一配置键，防双处漂移）
+_KEY_SHIFT_MAX = int(_SC.base.get("key_shift_max", 12))
+
 # 混音触发提前量：对齐点必须晚于当前播放位置 + 此余量（避免触发点在当前帧内）
-MIX_TRIGGER_MARGIN_SECONDS = 0.1
+MIX_TRIGGER_MARGIN_SECONDS = float(_SC.base.get("mix_trigger_margin_seconds", 0.1))
 
 # 对拍失败时的默认淡化时长（秒，B1 默认 16s）
-DEFAULT_FADE_SECONDS = 16.0
+DEFAULT_FADE_SECONDS = float(_SC.base.get("default_fade_seconds", 16.0))
 # 变速恢复时长（秒，B1 默认 30s：STRETCH 缓冲渐变回原速的时长）
-DEFAULT_RESTORE_SECONDS = 30.0
+DEFAULT_RESTORE_SECONDS = float(_SC.base.get("default_restore_seconds", 30.0))
 
 
 class TransitionManager:
@@ -34,19 +37,17 @@ class TransitionManager:
         self._engine = engine
         self._lock = threading.Lock()
         # 已预备的来曲缓冲与计划（None=无）
-        self._next_prepared: Optional[np.ndarray] = None
-        self._next_plan: Optional[TransitionPlan] = None
+        self._next_prepared: np.ndarray | None = None
+        self._next_plan: TransitionPlan | None = None
         # 预备中标记与参数快照（epoch 一致性校验用）
         self._preparing: bool = False
         self._prep_epoch: int = 0
-        self._next_bpm: float = 0.0
-        self._next_downbeats: list = []
         self._now_downbeats: list = []
         self._cue_sample: int = 0
         self._fade_seconds: float = DEFAULT_FADE_SECONDS
         self._restore_seconds: float = DEFAULT_RESTORE_SECONDS
         # 混音进度回调（on_done(plan, error)），由调用方保证线程安全（UI 用信号）
-        self._on_prepared: Optional[Callable] = None
+        self._on_prepared: Callable | None = None
 
     # --- 只读状态（UI 展示用） ---
 
@@ -100,7 +101,7 @@ class TransitionManager:
         fade_seconds: float = DEFAULT_FADE_SECONDS,
         restore_seconds: float = DEFAULT_RESTORE_SECONDS,
         key_shift: int = 0,
-        on_done: Optional[Callable] = None,
+        on_done: Callable | None = None,
     ) -> bool:
         # 预备来曲：判定 SKIP/STRETCH → 后台线程解码+渲染（key_shift≠0 时再变调）
         # → 完成后校验 epoch 安装。on_done(plan, error)：成功 plan 非 None；失败 error 非 None
@@ -115,13 +116,11 @@ class TransitionManager:
             self._prep_epoch += 1
             my_epoch = self._prep_epoch
             self._on_prepared = on_done
-            self._next_bpm = next_bpm
-            self._next_downbeats = list(next_downbeats)
             self._now_downbeats = list(now_downbeats)
             self._cue_sample = int(cue_seconds * SAMPLE_RATE)
             self._fade_seconds = fade_seconds
             self._restore_seconds = restore_seconds
-            self._key_shift = max(-12, min(12, int(key_shift)))
+            self._key_shift = max(-_KEY_SHIFT_MAX, min(_KEY_SHIFT_MAX, int(key_shift)))
 
         def _work() -> None:
             # 后台线程：解码 → 切 CUE → SKIP 原始缓冲 / STRETCH 变速渲染 → Key Shift 变调
@@ -225,3 +224,5 @@ class TransitionManager:
 # 异常处理：解码/渲染失败 → on_done(None, exc) + 清状态（不崩溃）；
 #   陈旧 worker 结果静默丢弃（不回调）
 # 关联配置：config/static/base.json（sample_rate）；transition.py/stretcher.py 复用
+
+

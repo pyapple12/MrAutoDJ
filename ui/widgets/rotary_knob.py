@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QLinearGradient,
@@ -15,6 +15,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget
 
 from config.static.static_config import get_static_config
+from ui.widgets._skins import metal_gradient
 
 # 静态配置解包（旋钮配色）
 _SC = get_static_config()
@@ -25,6 +26,9 @@ _SILK = QColor(_UI.get("silk_text", "#8a9099"))
 _GLOW_WHITE = QColor(_UI.get("glow_white", "#e8ecf0"))
 _ANGLE_RANGE = 270.0  # 行程 270°（DJ 旋钮惯例）
 _DRAG_SENS = 80.0  # 拖拽像素 → 全程（值域全程对应 80px）
+WHEEL_STEP_DIVISIONS = int(
+    _UI.get("wheel_step_divisions", 20)
+)  # 滚轮全程等分数（G1.3）
 
 
 class RotaryKnob(QWidget):
@@ -85,8 +89,8 @@ class RotaryKnob(QWidget):
         event.accept()
 
     def wheelEvent(self, event) -> None:
-        # 滚轮步进：全程 /20（下滚=减）
-        step = (self._max - self._min) / 20.0
+        # 滚轮步进：全程 /divisions（下滚=减；G1.3：配置驱动）
+        step = (self._max - self._min) / WHEEL_STEP_DIVISIONS
         delta = step if event.angleDelta().y() > 0 else -step
         self.set_value(self._value + delta)
         event.accept()
@@ -111,15 +115,11 @@ class RotaryKnob(QWidget):
 
         ang = math.radians(self._angle())
         r = s * 0.32
+        # G0.4：指针直接画"圆心→端点"（原实现用 QRectF 当点取 center 致线段错位）
         painter.setPen(QPen(_GLOW_WHITE, 2, Qt.SolidLine, Qt.RoundCap))
         painter.drawLine(
-            QRectF(cx, cy, cx + r * math.cos(ang), cy + r * math.sin(ang)).center(),
-            QRectF(
-                cx + r * math.cos(ang),
-                cy + r * math.sin(ang),
-                cx + r * math.cos(ang),
-                cy + r * math.sin(ang),
-            ).center(),
+            QPointF(cx, cy),
+            QPointF(cx + r * math.cos(ang), cy + r * math.sin(ang)),
         )
 
     def _render_cache(self) -> None:
@@ -150,13 +150,10 @@ class RotaryKnob(QWidget):
                 cx + r1 * math.cos(a),
                 cy + r1 * math.sin(a),
             )
-        # 外圈金属环（垂直渐变）
+        # 外圈金属环（G1.2：公共皮肤渐变）
         ring2_r = s * 0.34
         ring2 = QRectF(cx - ring2_r, cy - ring2_r, ring2_r * 2, ring2_r * 2)
-        grad = QLinearGradient(0, 0, 0, s)
-        grad.setColorAt(0.0, QColor(215, 219, 225, 255))
-        grad.setColorAt(1.0, QColor(115, 119, 125, 255))
-        p.setBrush(grad)
+        p.setBrush(metal_gradient(0, 0, 0, s))
         p.setPen(Qt.NoPen)
         p.drawEllipse(ring2)
         # 中心旋帽（内凹座 + 顶部高光弧）

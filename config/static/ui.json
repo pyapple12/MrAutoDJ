@@ -21,5 +21,9 @@
   "jog_bend_reset_ms": 80,
   "jog_bend_step": 0.05,
   "jog_scratch_gain": 256,
-  "jog_scratch_speed_ref": 800
+  "jog_scratch_speed_ref": 800,
+  "jog_search_step": 4.0,
+  "wheel_step_divisions": 20,
+  "led_green_threshold": 0.6,
+  "led_yellow_threshold": 0.85
 }

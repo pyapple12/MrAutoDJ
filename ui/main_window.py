@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import threading
+import time as _time
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, Qt, Signal
@@ -13,7 +14,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
-    QMessageBox,
     QSplitter,
     QStatusBar,
     QTableWidget,
@@ -26,6 +26,10 @@ from config.static.static_config import get_static_config
 from modules import analyzer as analyzer_mod
 from modules.engine import AudioEngine
 from modules.transition import tempo_compatible
+from ui.beat_fx_widget import BeatFxWidget
+from ui.deck_widget import DeckWidget
+from ui.jog_wheel import JogWheel
+from ui.pad_widget import PadWidget
 from ui.widgets.fader_slider import FaderSlider
 from ui.widgets.glow_button import GlowButton
 from ui.widgets.led_strip import LedStrip
@@ -37,7 +41,7 @@ from utils.logger import get_logger
 
 # 静态配置解包（窗口尺寸，AGENTS.md 参数约定）
 _SC = get_static_config()
-_UI_COLORS = _SC.ui.get("colors", {})
+_UI = _SC.ui  # 静态配置解包（窗口尺寸/配色 token）
 
 _logger = get_logger(__name__)
 
@@ -110,9 +114,9 @@ class MainWindow(QMainWindow):
         browse = QHBoxLayout(browse_panel)
         browse.setContentsMargins(10, 8, 10, 8)
         self._load_a_btn = GlowButton("LOAD A")
-        self._load_a_btn.set_led(True, "#ff7a2f")
+        self._load_a_btn.set_led(True, _UI.get("glow_orange", "#ff7a2f"))
         self._load_b_btn = GlowButton("LOAD B")
-        self._load_b_btn.set_led(True, "#ff7a2f")
+        self._load_b_btn.set_led(True, _UI.get("glow_orange", "#ff7a2f"))
         self._search = QLineEdit()
         self._search.setPlaceholderText("搜索曲库...")
         self._open_btn = GlowButton("打开文件夹")
@@ -134,19 +138,18 @@ class MainWindow(QMainWindow):
         lib_panel = PanelFrame("LIBRARY")
         lib_box = QVBoxLayout(lib_panel)
         lib_box.setContentsMargins(8, 8, 8, 8)
-        self._table = QTableWidget(0, 5)
-        self._table.setHorizontalHeaderLabels(["Mix", "曲名", "BPM", "调性", "能量"])
+        self._table_headers = _SC.ui.get(
+            "table_headers", ["状态", "曲名", "BPM", "调性", "能量"]
+        )
+        self._table = QTableWidget(0, len(self._table_headers))
+        self._table.setHorizontalHeaderLabels(self._table_headers)
         self._table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectRows)
         self._table.horizontalHeader().setStretchLastSection(True)
         lib_box.addWidget(self._table)
         body.addWidget(lib_panel)
 
-        # 双打碟机（含 E2 组件：Jog / Pad / 表演键）
-        from ui.deck_widget import DeckWidget
-        from ui.jog_wheel import JogWheel
-        from ui.pad_widget import PadWidget
-
+        # 双打碟机（含 E2 组件：Jog / Pad / 表演键；G3.5 导入上移顶层）
         self.deck_widget_a = DeckWidget("DECK A")
         self.deck_widget_b = DeckWidget("DECK B")
         self.jog_a = JogWheel()
@@ -288,9 +291,7 @@ class MainWindow(QMainWindow):
         return panel
 
     def _build_effects_panel(self) -> QWidget:
-        # 构建 Effects 面板：MASTER 旋钮 + Beat FX + 转场按钮
-        from ui.beat_fx_widget import BeatFxWidget
-
+        # 构建 Effects 面板：MASTER 旋钮 + Beat FX + 转场按钮（G3.5 导入已上移顶层）
         panel = PanelFrame("EFFECTS")
         box = QVBoxLayout(panel)
         box.setContentsMargins(8, 8, 8, 8)
@@ -305,7 +306,7 @@ class MainWindow(QMainWindow):
         # 转场（FLX4 无此部件，保留功能：Prepare/Mix）
         self._prepare_btn = GlowButton("Prepare 来曲")
         self._mix_btn = GlowButton("Mix Now")
-        self._mix_btn.set_led(True, "#ff7a2f")
+        self._mix_btn.set_led(True, _UI.get("glow_orange", "#ff7a2f"))
         tr_col = QVBoxLayout()
         tr_col.addWidget(self._prepare_btn)
         tr_col.addWidget(self._mix_btn)
@@ -332,8 +333,11 @@ class MainWindow(QMainWindow):
             lambda v: self._engine.crossfader.set_position(v)
         )
         self._volume.valueChanged.connect(lambda v: self._engine.set_volume(v))
-        # E2.1 SHIFT：按钮与键盘共用状态
+        # E2.1 SHIFT：按钮与键盘共用状态（G3.1：changed 接线到按钮 LED 灯态）
         self._shift_btn.toggled.connect(self._shift.set_active)
+        self._shift.changed.connect(
+            lambda on: self._shift_btn.set_led(on, _UI.get("glow_blue", "#2f8bff"))
+        )
         for deck_letter, widget in (
             ("a", self.deck_widget_a),
             ("b", self.deck_widget_b),
@@ -363,7 +367,6 @@ class MainWindow(QMainWindow):
         ):
             jog.bend_changed.connect(lambda v, l=letter: self._on_bend_release(l, v))
             jog.search_changed.connect(lambda v, d=deck: d.jog_search(v))
-            jog.search_changed.connect(lambda v: self._on_search_release(v))
             jog.scratch_moved.connect(lambda s, d=deck: d.jog_scratch(s))
             jog.touch_changed.connect(lambda on, d=deck: d.jog_touch(on))
             jog.vinyl_toggled.connect(
@@ -518,7 +521,6 @@ class MainWindow(QMainWindow):
         entry = next((e for e in self._library if e["path"] == path), None)
         if entry is None:
             return
-        import time as _time
 
         now = _time.time()
         if self._last_load[0] == path and now - self._last_load[1] < 0.5:
@@ -648,10 +650,6 @@ class MainWindow(QMainWindow):
         # 弯音定时归零：脉冲结束恢复原速
         getattr(self._engine, f"deck_{letter}").jog_bend(0.0)
         self._bend_pending[letter] = 0.0
-
-    def _on_search_release(self, v: float) -> None:
-        # 搜索信号记录（释放时归零由 jog 自身轮转处理；此处仅占位）
-        pass
 
     def _on_vinyl(self, letter: str, on: bool) -> None:
         # Vinyl 模式切换提示
@@ -800,7 +798,7 @@ class MainWindow(QMainWindow):
 
 # ===== ui/main_window.py 模块说明 =====
 # 模块级常量：
-#   _SC / _UI_COLORS：静态配置（窗口尺寸/颜色）
+#   _SC / _UI：静态配置（窗口尺寸/配色 token）
 #   _logger：统一日志器（utils.logger）
 # 类型：
 #   MainWindow(QMainWindow)：主窗口（engine 可注入便于无头测试）

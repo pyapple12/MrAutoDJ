@@ -30,8 +30,10 @@ def main() -> None:
     from PySide6.QtWidgets import QApplication
 
     from ui.main_window import MainWindow
+    from ui.themes import apply_theme
 
     app = QApplication(sys.argv)
+    apply_theme(app)  # G0.7：主题接线（原未调用，QSS 从未生效）
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

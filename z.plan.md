@@ -208,7 +208,7 @@ MrAutoDJ：从虚拟 DJ 台起步，逐步演进为 AI 自动 DJ 与 LLM 电台�
   - [x] P1 Echo 回绕跳读（2026-08-12 已修：删 start 判断恒从块头读；无头验证 + GUI 听测确认）
   - [x] P2 弯音不归零（2026-08-12 已修：单发 QTimer 累积归零 + 减速插值防卡顿；GUI 实测确认）
   - [x] P3 搓碟语义（2026-08-12 已修：触摸锁定 + 平滑变速刮擦 + Slip 落回；GUI 实测确认）
-  - P5 Pitch 滑块无效果（M1 遗留占位）——📌 **V0.21 之后修复**，见 y.problem.md
+  - P4 Pitch 滑块无效果（M1 遗留占位）——📌 **V0.21 之后修复**，见 y.problem.md
 - [x] **M1.6 UI 拟物改版**（V0.22，方案 2026-08-10 与用户讨论定稿；2026-08-12 完成，任务明细见 x.progress.md F 系列；V0.21 已被 P1-P3 修复占用故版本顺延）
   > 定位：把 M1.5 的四区布局从"标准 Qt 控件 + QSS"升级为 **QPainter 自绘拟物原语体系**（Mixxx 皮肤同路线），视觉对标 FLX4/Rekordbox 现代硬件面板；只改视觉层，引擎与交互逻辑零改动
   - [x] **方案决策**（已定稿）：
@@ -321,3 +321,83 @@ Mixxx（架构参照）、pyCrossfade、ai-remixmate、radio-dj、WrzDJ（点歌
 - [ ] 用户创建/导入 FLX4 布局设计稿（或自定义布局稿），分享文件权限给 token 所属账号
 - [ ] 在 M1.6 Step 1（配色 + 原语）之前完成配置，使 Step 2（Mixer 区替换）直接按设计稿坐标实现
 - 备注：非 Figma 设计工具（Sketch/XD/PS）无成熟 MCP，届时退回"导出 PNG + 读图核对"方式
+
+---
+
+## 附录：全量代码审计报告（2026-08-12）
+
+> 范围：全部 25 个 .py + 3 个 JSON 配置（main.py / utils×5 / config×3 / modules×8 / ui×10 / ui/widgets×6）
+> 方式：三路并行只读审计（utils/config、modules、ui），信号接线全量核对无类型失配；未修改任何代码
+> 状态：✅ **P0-P3 已全部修复**（2026-08-12 G 系列完成，见 x.progress.md；probe_g0-g3 + 全量回归 9/9 PASS + GUI 实测确认；后续多轮审计迭代中）
+
+### 一、重复造轮子专项（14 处，本次审计重点）
+
+| #   | 重复点                                                         | 位置                                                                         | 后果                                                                              |
+| --- | -------------------------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| 1   | pydub 解码+归一化                                              | engine.load_audio vs analyzer._decode_mono                                   | 归一化策略不一致（按位深 vs 固定 32768），24/32-bit 两处数值不同；应抽 utils 共用 |
+| 2   | utils.convert 弹性转换零使用                                   | analyzer.py:20 导入 to_float 未调用；to_int/to_optional_float 无调用方       | 弹性转换防线形同虚设                                                              |
+| 3   | utils.retry 整模块无调用                                       | radio/analyzer 均未用                                                        | 与"缓存兜底/重试"策略脱节                                                         |
+| 4   | config.settings 整模块无调用                                   | AppConfig/load/save_config 零引用                                            | 用户配置持久化未接线 UI                                                           |
+| 5   | 金属渐变绘制三处重复                                           | jog_wheel/fader_slider/rotary_knob（同色值系）                               | 应抽 ui/widgets/_skins.py 公共皮肤工具                                            |
+| 6   | 滚轮步进"全程/20"两处                                          | rotary_knob/fader_slider                                                     | 抽公共常量                                                                        |
+| 7   | 拍长计算两处                                                   | engine beat_jump vs set_beatloop                                             | 提取 _beat_len(bpm)                                                               |
+| 8   | 候选打分循环两处                                               | analyzer._estimate_bpm vs _pick_metrical_level                               | 提取 _score_candidate()                                                           |
+| 9   | Key Shift 钳制两处                                             | engine.py:456 vs transition_manager.py:124                                   | 统一进 config                                                                     |
+| 10  | 回调内插值结构重复                                             | engine 弯音 vs scratch（idx/i0/i1/frac 加权）                                | 抽公共插值方法                                                                    |
+| 11  | scan_folder 重复风险                                           | analyzer.py:530 已实现 vs library.py 占位同名                                | M1 实现时直接复用勿重写                                                           |
+| 12  | set_channel_fader 复制 deck.stop 逻辑                          | engine 锁内直改 7 个私有字段                                                 | Deck 提供原子 fader_stop/start()                                                  |
+| 13  | 表头配置未用                                                   | main_window 硬编码 ["Mix",…] vs ui.json table_headers ["状态",…]（值不一致） | 用配置驱动                                                                        |
+| 14  | file_utils.clear_cache 死代码 + read_json 对不存在文件也写缓存 | —                                                                            | 缓存永久陈旧风险                                                                  |
+
+### 二、严重问题（功能/正确性/稳定性）
+
+1. themes.py 未接线：apply_theme() 全项目无调用，QSS 从未生效（自绘控件不受影响，原生控件/表格无样式）
+2. analyzer.py:501 engine_sr=44100 硬编码：base.json 采样率变更即 beats/downbeats 索引错位（正确性 bug）
+3. engine.py:818 除零：start_mix 不校验 fade_seconds>0 → _fill_mixing 除零整段静音
+4. engine.py:740 正向搜索形状错误：|search_rate|<1 时 out[:]=chunk[:frames] 形状不匹配（与已修弯音 bug 同源未修）
+5. stretcher.py 无 rubberband 前置检查：缺失时 TypeError 而非可读错误
+6. CuePlayer 二次失败外抛：与"故障静默 is_dead"承诺相悖
+7. rotary_knob.py:115-123 指针绘制可疑：QRectF 当"点"用 + 取 center，线段起点/长度异常，应直接 drawLine(cx,cy,…)
+8. panel_frame.py:37 set_title AttributeError：无标题构造后调用必崩
+9. pad 灯态冲突：pad 点击 isChecked 残留 + GlowButton 辉光判定混用交互态/业务灯态 → pad 灯阵失真
+10. main_window.py:535 直接写 deck._position：绕过锁与 API（Instant Doubles）
+11. deck_widget.py:95 44100 硬编码：M:SS 换算与 base.json 脱钩（说明区自认）
+
+### 三、硬编码与配置化（AGENTS.md 参数约定违反）
+
+- modules 层：MAX_GAIN/VU_BUFFER/EQ 频率(100/1k/10k Hz)与增益斜率/Hot Cue 槽位 8×6 处/弯音±0.5/搜索±16/Key Shift±12/转场参数(16s/30s/0.1s)/分析参数群（MIN/MAX_BPM、能量权重、CUE 参数）
+- ui 层：#ff7a2f 等配色 20+ 处与 ui.json 同名键重复、定时器 100ms、splitter 比例、16777248（应 Qt.Key_Shift）、Instant Doubles 0.5s、状态栏 5000ms、Pitch 范围、Beat Loop/Jump 拍数表
+- 配置承诺未兑现：led_strip 读 ui.json 不存在的键（led_green_threshold/led_yellow_threshold）；jog_wheel SEARCH_WHEEL_STEP=4.0 未进配置；table_headers 键死配置
+
+### 四、防御性编程缺口
+
+- convert.to_float 不拦截 "nan"/"inf"（污染分析数据）
+- waveform._build_peaks 无 1D 音频防护（IndexError）
+- fader_slider/rotary_knob 在 min==max 时除零
+- glow_button/mini_display 长文本溢出无省略
+- static_config 对 mapping 非 dict、键缺失无校验（与"抛错暴露"注释矛盾）
+- engine EQ/FX setter 无锁（系数错配一帧）；浮点精确比较（==1.0）脆弱
+
+### 五、死代码
+
+vu_meter.py 整模块（被 LedStrip 替代）、shift_state.toggle/active/changed（零调用零订阅）、fader_slider._TRAVEL、main_window QMessageBox 导入/_UI_COLORS/_on_search_release 占位接线、engine._last_out_pos（只写不读）、transition_manager._next_bpm/_next_downbeats（只写不读）、utils.convert 两函数、utils.retry 整模块、config.settings 整模块、file_utils.clear_cache
+
+### 六、规范违反
+
+- 函数内延迟导入 8+ 处（main_window×5、engine import time、analyzer tempfile/get_project_root、deck_widget Path）——librosa 豁免条款不适用
+- Optional[...] 6+ 处未用 | None；tuple/list/dict 泛注解多处
+- 说明区失实 5 处：engine（缺类/常量/分配取舍注释）、jog_wheel（0.02/×256 全面过时）、analyzer（缺 6 函数）、stretcher、convert（声称 analyzer 复用失实）
+- 参考标注注释：jog_wheel/pad_widget/beat_fx/vu_meter/shift_state 第 2 行"参考：w.study.md…"——与"正式程序文件禁止参考标注"字面冲突
+
+### 七、亮点（合规良好）
+
+回调 fail-soft 双 try/except 静音降级落实到位；预分配缓冲（_buf_a/_buf_b/VU 环形）设计正确；analyzer 进程池 spawn + numba 缓存隔离（Windows 安全）；信号接线全量核对无类型失配；占位模块 M2/M3 边界清晰；文件尾说明区体系基本完整
+
+### 八、建议优先级
+
+| 优先级    | 事项                                                                                                                         |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| P0 正确性 | ① analyzer 采样率硬编码 ② 搜索分支形状错误 ③ fade 除零 ④ rotary 指针绘制 ⑤ pad 灯态冲突 ⑥ panel set_title 崩溃 ⑦ themes 接线 |
+| P1 去重   | ① 解码归一化统一（严重，数值不一致）② 金属渐变抽 _skins.py ③ 拍长/钳制/步进公共化 ④ 表头配置化                               |
+| P2 配置化 | modules 参数群 + ui 配色 20 处进 config，兑现 led 阈值/搜索步进/表头承诺                                                     |
+| P3 清理   | 死代码（vu_meter/settings/retry/convert 未用部分）→ 归档或接线；说明区同步；Optional→\|None；延迟导入上移；参考标注移除      |

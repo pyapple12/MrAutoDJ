@@ -35,8 +35,15 @@ class PanelFrame(QFrame):
             self._label.move(12, 6)
 
     def set_title(self, title: str) -> None:
-        # 运行期改标题（丝印文本更新）
+        # 运行期改标题（G0.6：无标题构造时惰性创建标签，防 AttributeError）
         self._title = title
+        if not hasattr(self, "_label"):
+            self._label = QLabel(title.upper(), self)
+            self._label.setStyleSheet(
+                f"color: {_SILK.name(QColor.HexRgb)}; font-weight: 600; "
+                f"letter-spacing: 3px; background: transparent;"
+            )
+            self._label.move(12, 6)
         self._label.setText(title.upper())
 
     def paintEvent(self, event) -> None:

@@ -1,4 +1,5 @@
 # 配置管理模块：用户配置 AppConfig dataclass + JSON 持久化（项目内 config/user_config.json，对齐 mrboard）
+# 状态：规划中——当前无业务调用方（G3.2 审计标注）；后续 UI 接入窗口几何/主题持久化时启用
 
 from dataclasses import dataclass
 from pathlib import Path

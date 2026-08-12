@@ -278,6 +278,7 @@ def make_keylock_buffer(
 #   _bundled_rubberband()：项目内置路径探测（换电脑/未安装也可用）
 #   rubberband_available()：启动探测（缺失返回 False，引擎降级为 skip 直混）
 #   _build_timemap(...)：构建 64 锚点 timemap（恒速段→smootherstep 恢复段→1.0）
+#   _smootherstep_integral(x)：smootherstep 曲线积分（恢复段位置映射，G3.3 补全）
 #   _drain_stderr_with_progress/_safe_progress：CR 覆盖进度逐字符解析 + 异常隔离
 #   _run_rubberband(cmd, cb)：执行命令（带进度或纯等待），非零退出抛 RuntimeError
 #   make_transition_buffer(audio, start_rate, fade_s, restore_s, sr, cb)：

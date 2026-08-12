@@ -5,15 +5,20 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from config.static.static_config import get_static_config
+
+# 静态配置解包（转场调参，G2.1：配置驱动）
+_SC = get_static_config()
+
 # 渐变结束时可容忍的节拍漂移上限（拍）。≤0.25 拍则跳过拉伸直接混音
 # 含义：±0.5BPM@30s 淡入、±1.0BPM@15s、±1.88BPM@8s；精确倍频（128↔64）恒 skip
-MAX_DRIFT_BEATS = 0.25
+MAX_DRIFT_BEATS = float(_SC.base.get("max_drift_beats", 0.25))
 
 # 八度折叠后的拍速比可视为"可对拍混音"的容差（UI 匹配标记用，0.06≈手推转盘范围）
-TEMPO_MATCH_TOLERANCE = 0.06
+TEMPO_MATCH_TOLERANCE = float(_SC.base.get("tempo_match_tolerance", 0.06))
 
 
-def fold_ratio(r: float) -> tuple:
+def fold_ratio(r: float) -> tuple[float, str]:
     # 八度折叠：把拍速比折到最接近 1.0 的解释（对数空间，每侧最多一个八度）
     # 返回 (r_eff, relation)，relation ∈ {"", "half-time", "double-time"}
     candidates = {"": r, "half-time": r / 2.0, "double-time": 2.0 * r}
@@ -83,3 +88,4 @@ def plan_transition(
 #   （64BPM 曲拉伸到 128 的经典 bug，用 r_eff 而非原始比值）
 # 异常处理：无（拍速≤0 视为 skip 混音，不抛错）
 # 关联配置：无（stretcher.py/engine.py 复用）
+

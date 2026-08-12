@@ -1,5 +1,4 @@
 # 性能打击垫组件：1×8 网格 + 模式切换（FLX4 8 种 Pad 模式中的 5 种可软件实现）
-# 参考：w.study.md B13-3.12（Pad）/ 3.8-3.11（模式键）、M1.6 布局规格单
 # F6.2 改版：QPushButton → GlowButton（背光 + 五模式色灯态）
 
 from __future__ import annotations
@@ -37,7 +36,8 @@ class PadWidget(QWidget):
         pads.setSpacing(4)
         for i in range(8):
             btn = GlowButton(f"P{i + 1}")
-            btn.setCheckable(True)
+            # G0.5：pad 不使用勾选态（点按辉光由 isDown 驱动，业务灯态由
+            # set_pad_light→set_led 驱动，防 isChecked 残留导致灯阵失真）
             btn.setFixedSize(35, 35)
             btn.clicked.connect(
                 lambda checked, idx=i: self.pad_clicked.emit(idx, self._mode)

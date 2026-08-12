@@ -17,12 +17,15 @@ from typing import Callable
 import numpy as np
 
 from config.static.static_config import get_static_config
-from utils.convert import to_float
 
-# 静态配置解包（采样率/跳帧/缓存路径，AGENTS.md 参数约定：零硬编码）
+# 静态配置解包（采样率/跳帧/缓存路径/BPM 区间，AGENTS.md 参数约定：零硬编码）
 _SC = get_static_config()
 ANALYSIS_SAMPLE_RATE = int(_SC.base.get("analysis_sample_rate", 22050))
 ANALYSIS_HOP = int(_SC.base.get("analysis_hop", 512))
+
+# BPM 合理区间（DJ 折半/加倍折叠用，G2.1：配置驱动）
+MIN_BPM = float(_SC.base.get("min_bpm", 70.0))
+MAX_BPM = float(_SC.base.get("max_bpm", 180.0))
 
 SUPPORTED_EXTENSIONS = {
     ".mp3",
@@ -39,9 +42,8 @@ SUPPORTED_EXTENSIONS = {
     ".webm",
 }
 
-# BPM 合理区间（DJ 用）：估计值折半/加倍进此区间（cuekey tempo.py 约定）
-MIN_BPM = 70.0
-MAX_BPM = 180.0
+# BPM 合理区间（DJ 用）：估计值折半/加倍进此区间（cuekey tempo.py 约定，
+# G2.1 配置驱动：值见顶部 MIN_BPM/MAX_BPM）
 
 # 缓存算法版本：检测算法变更时 +1，旧缓存自动失效重算
 ANALYSIS_VERSION = 1
@@ -420,7 +422,9 @@ def _detect_energy(y: np.ndarray, sr: int, bpm: float) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _detect_cues(y: np.ndarray, sr: int, bpm: float, beat_times: np.ndarray) -> list:
+def _detect_cues(
+    y: np.ndarray, sr: int, bpm: float, beat_times: np.ndarray
+) -> list[int]:
     # 自动 CUE：MFCC+chroma 聚合聚类分段 → 边界吸附最近拍点 → 8s 去重 → 最多 8 个
     import librosa
 
@@ -481,13 +485,11 @@ def empty_record() -> dict:
 
 
 def _decode_mono(path: str, sr: int) -> np.ndarray:
-    # 解码音频为 sr Hz mono float32（pydub 基于 ffmpeg；失败抛异常由上层降级）
-    from pydub import AudioSegment
+    # 解码音频为 sr Hz mono float32 一维（G1.1：复用 utils 统一解码；
+    # 失败抛异常由上层降级）
+    from utils.audio_decode import decode_audio
 
-    seg = AudioSegment.from_file(path)
-    seg = seg.set_channels(1).set_frame_rate(sr)
-    raw = np.array(seg.get_array_of_samples(), dtype=np.float32)
-    return raw / 32768.0
+    return decode_audio(path, 1, sr)[:, 0]
 
 
 def analyze_file(path: str, with_cues: bool = True) -> dict:
@@ -497,8 +499,9 @@ def analyze_file(path: str, with_cues: bool = True) -> dict:
     key = _detect_key(y, ANALYSIS_SAMPLE_RATE)
     energy = _detect_energy(y, ANALYSIS_SAMPLE_RATE, tempo["bpm"])
     beat_times = tempo["beat_times"]
-    # beats/downbeats 转引擎采样率(44100)样本索引（B1 约定：可直接对 engine.position 使用）
-    engine_sr = 44100
+    # beats/downbeats 转引擎采样率样本索引（B1 约定：可直接对 engine.position 使用；
+    # 采样率读 base.json，G0.1 修复——原硬编码 44100 与配置脱钩）
+    engine_sr = int(_SC.base.get("sample_rate", 44100))
     beats = (beat_times * engine_sr).round().astype(int).tolist()
     # downbeat：低频能量相位选择（每 4 拍取强拍相位），至少 16 拍才判定
     if len(beats) >= 16:
@@ -527,7 +530,7 @@ def analyze_file(path: str, with_cues: bool = True) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def scan_folder(root: str) -> list:
+def scan_folder(root: str) -> list[str]:
     # 递归收集支持格式的音频文件（按路径排序；目录不存在返回空）
     root_path = Path(root)
     if not root_path.is_dir():
@@ -669,7 +672,7 @@ def _analyze_task(path: str, with_cues: bool) -> dict:
 
 
 def analyze_many(
-    paths: list,
+    paths: list[str],
     on_result: OnResult,
     with_cues: bool = True,
     max_workers: int | None = None,
@@ -814,7 +817,14 @@ if __name__ == "__main__":
 # 类型：
 #   Key(frozen dataclass)：调性对象（pitch_class/mode + standard/camelot 记谱）
 #   AnalysisCache：SQLite 分析缓存（size/mtime/version 三重校验，失败降级无缓存）
-# 函数：
+# 函数（G3.3 补全）：
+#   _decode_mono(path, sr)：解码为 sr Hz mono 一维（G1.1 复用 utils/audio_decode.py）
+#   _pearson(x, y)：皮尔逊相关（KK 24 键打分用）
+#   _cache_dir()：SQLite 缓存路径解析（cache_path 配置）
+#   _default_workers()：进程池 worker 数（核数-2 受内存限制）
+#   _warm_worker()：worker 初始化（numba 缓存隔离：每进程私有临时目录）
+#   _analyze_task(path, with_cues)：进程池任务入口（返回 (path, record, error)）
+#   main()：CLI 入口（--folder 批量分析 --json 输出）
 #   parse_key(text)：标准记谱解析（"Am"/"C"/"F#m"）
 #   _fold_bpm/_snap_bpm/_refine_bpm：BPM 折叠/吸附/精修（纯函数可单测）
 #   _estimate_bpm/_pick_metrical_level：onset 自相关打分 + 节拍级修正（含 125BPM 先验）
