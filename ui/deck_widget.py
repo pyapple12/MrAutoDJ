@@ -4,19 +4,17 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QSlider,
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import Qt
 
 from ui.waveform_widget import WaveformWidget
+from ui.widgets.glow_button import GlowButton
 
 
 class DeckWidget(QWidget):
@@ -38,12 +36,13 @@ class DeckWidget(QWidget):
 
         self.waveform = WaveformWidget()
 
-        self._play_btn = QPushButton("播放")
-        self._cue_btn = QPushButton("CUE")
-        self._loop_btn = QPushButton("循环")
+        self._play_btn = GlowButton("播放")
+        self._cue_btn = GlowButton("CUE")
+        self._loop_btn = GlowButton("循环")
         self._loop_btn.setCheckable(True)
-        self._beatloop_btn = QPushButton("Beatloop 4")
-        self._keylock_cb = QCheckBox("Keylock")
+        self._beatloop_btn = GlowButton("Beatloop 4")
+        self._keylock_cb = GlowButton("Keylock")
+        self._keylock_cb.setCheckable(True)
 
         self._pitch_slider = QSlider(Qt.Horizontal)
         self._pitch_slider.setRange(-8, 8)
@@ -98,8 +97,9 @@ class DeckWidget(QWidget):
         self._progress_label.setText(f"{cur} / {tot}")
 
     def set_playing_state(self, is_playing: bool) -> None:
-        # 播放状态按钮文案（播放/暂停 切换）
+        # 播放状态按钮文案与 LED（播放=橙色背光）
         self._play_btn.setText("暂停" if is_playing else "播放")
+        self._play_btn.set_led(is_playing, "#ff7a2f")
 
     def _on_pitch_changed(self, value: int) -> None:
         # Pitch 滑块变化：更新标签并发信号（百分比）

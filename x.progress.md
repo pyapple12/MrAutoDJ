@@ -104,9 +104,9 @@
 - [x] E4.3 冒烟 + GUI 无头初始化
 - [x] E4.4 提交 V0.2（由用户执行）
 
-## F. V0.21 任务清单（P1-P3 修复 + M1.6 UI 拟物改版）
+## F. 任务清单（F1-F3 = P1-P3 修复，V0.21；F4-F7 = M1.6 UI 拟物改版，V0.22）
 
-> 规划：2026-08-11 定稿。版本号统一 V0.21（z.plan.md M1.6 已同步）；Git 提交拆分由用户决定。
+> 规划：2026-08-11 定稿。P1-P3 修复已随 V0.21 提交；M1.6 UI 拟物改版为 V0.22（V0.21 被修复占用故顺延）；Git 提交拆分由用户决定。
 > 验证约定：P1-P3 为听感/手感问题，修完必须 GUI 实测；M1.6 每步无头截图 + 用户对照 Figma 设计稿迭代。
 > 做法说明：`—— 做法` 为执行要点，子任务均需自查代码上下文后动手。
 
@@ -135,34 +135,36 @@
 
 > 决策背景：Figma 无法操作（无设计稿/token），用户选择更换多模态主模型（方案 A）——AI 直接读图核对，Figma MCP 降级为备选（见 z.plan.md 附录）。
 
-- [ ] F4.1 更换多模态主模型 —— `.opencode/opencode.json` 的 `model` 字段改为支持视觉的模型（候选：qwen-vl / gpt-4o / claude-sonnet 系列，按 opencode-go 渠道可用模型选定）；改完重启 opencode 生效
-- [ ] F4.2 视觉能力验证 —— 生成测试图（含文字/色块/几何图形）用 read 工具读取，确认能正确描述图片内容；通过后此项 ✅
-- [ ] F4.3 收集布局参考 —— 用户提供 FLX4 面板参考图（实物照片/官方面板图，PNG 放 `.temp/design_ref/`）或我搜索官方面板图；结合 B13 部件清单 + 用户口述布局偏好，定布局意图
-- [ ] F4.4 生成布局规格单 —— 读参考图提取布局要素（分区位置/控件分布/相对比例/主色系）→ 写 `docs/ui_layout.md`（ASCII 图 + 部件表：位置/尺寸/间距/对齐/配色）；用户确认后作为实现基准
-- [ ] F4.5 ui.json 配色 token —— 从参考图识别的色值（或用户指定）注册：panel_base/panel_edge/panel_inset/silk_text、glow_orange/blue/green/white、pad_color[5]；原主题色映射到新 token（themes.py 同步引用）
+- [x] F4.1 更换多模态主模型 —— 用户已切换（2026-08-13 确认，read 工具可读图）
+- [x] F4.2 视觉能力验证 —— DDJ-FLX4 参考图读取成功，布局要素/控件分布/主色系提取无误
+- [x] F4.3 收集布局参考 —— 用户提供 FLX4 官方面板渲染图（.reference/dj-controller/DDJ-FLX4）+ B13 部件清单
+- [x] F4.4 生成布局规格单 —— `docs/ui_layout.md`：四区 ASCII 图 + 部件表（Browse/Deck/Mixer/Effects 四区 30+ 控件）+ 配色方案 + 尺寸基准（1280×800 画板、Jog 140×140、Pad 35×35 等）+ 交互语义
+- [x] F4.5 ui.json 配色 token —— panel_base/panel_edge/panel_inset/silk_text + glow_orange/blue/green/white + pad_colors[5] 已注册；加载验证 OK（panel_base=#1c1e22 等）
+- [x] F4.6 冒烟 —— 全模块 import + token 加载验证通过
 
 ### F5. 原语控件库（ui/widgets/，全 paintEvent 自绘 + 静态层 QPixmap 缓存）
 
-- [ ] F5.1 PanelFrame —— QFrame 子类；paintEvent：QRoundedRect 路径填充垂直渐变（panel_base→panel_edge）+ 顶部 2px 高光带 + 内阴影；标题 QLabel 叠放（silk_text、uppercase、字距）；只画静态、一次渲染缓存
-- [ ] F5.2 RotaryKnob —— QWidget 子类；静态层（30° 扇形刻度环+外圈+凹槽）QPixmap 缓存；动态层：指针线按 value 旋转；mousePress/Move 垂直拖拽（dy→value 映射）、wheelEvent 步进、doubleClick 复位；`valueChanged(float)` 信号
-- [ ] F5.3 GlowButton —— QAbstractButton 子类；paintEvent 按态绘制：常态内凹座（inset+内阴影）、按下/active 画 QRadialGradient 辉光（led_color 扩散）+ 亮色文字；`set_led(on, color)`；pressed/released 信号
-- [ ] F5.4 FaderSlider —— QWidget 子类；静态层：水平/垂直凹槽（内阴影）+ 两端刻度 + 中央线；动态层：金属帽（垂直渐变+高光棱）；拖拽 + wheel + doubleClick 回中；`valueChanged` 信号
-- [ ] F5.5 LedStrip —— QWidget 只读；`set_level(0..1)` 触发 update；paintEvent 画 N 段：段高度按 level 截止，绿→黄→红分带（阈值常量进 ui.json）
-- [ ] F5.6 MiniDisplay —— QWidget 只读；`set_text(str)`；paintEvent：黑底圆角 + 荧光绿等宽文字 + 微弱辉光（半透明多层绘制模拟）
-- [ ] F5.7 自检与样例截图 —— 确认 ui/widgets/ 内零 `import modules/`；写 `.temp/preview_primitives.py`：offscreen 渲染 PanelFrame+旋钮+按钮+推子+LedStrip 样例 → `.temp/ui_preview/primitives.png`，AI 读图自检质感 + 用户确认第一版观感
+- [x] F5.1 PanelFrame —— QFrame 子类；paintEvent：QRoundedRect 路径填充垂直渐变（panel_base→panel_edge）+ 顶部高光带 + 内阴影；标题 QLabel 叠放（silk_text、uppercase、字距）；只画静态、一次渲染缓存
+- [x] F5.2 RotaryKnob —— QWidget 子类；静态层（30° 扇形刻度环+外圈+凹槽）QPixmap 缓存；动态层：指针线按 value 旋转；mousePress/Move 垂直拖拽（dy→value 映射）、wheelEvent 步进、doubleClick 复位；`valueChanged(float)` 信号
+- [x] F5.3 GlowButton —— QAbstractButton 子类；paintEvent 按态绘制：常态内凹座（inset+内阴影）、按下/active 画 QRadialGradient 辉光（led_color 扩散）+ 亮色文字；`set_led(on, color)`；pressed/released 信号
+- [x] F5.4 FaderSlider —— QWidget 子类；静态层：水平/垂直凹槽（内阴影）+ 两端刻度 + 中央线；动态层：金属帽（垂直渐变+高光棱）；拖拽 + wheel + doubleClick 回中；`valueChanged` 信号
+- [x] F5.5 LedStrip —— QWidget 只读；`set_level(0..1)` 触发 update；paintEvent 画 N 段：段高度按 level 截止，绿→黄→红分带（阈值常量进 ui.json）
+- [x] F5.6 MiniDisplay —— QWidget 只读；`set_text(str)`；paintEvent：黑底圆角 + 荧光绿等宽文字 + 微弱辉光（半透明多层绘制模拟）
+- [x] F5.7 自检与样例截图 —— 确认 ui/widgets/ 内零 `import modules/`；写 `.temp/preview_primitives.py`：offscreen 渲染 PanelFrame+旋钮+按钮+推子+LedStrip 样例 → `.temp/ui_preview/primitives.png`，AI 读图自检质感 + 用户确认第一版观感
 
 ### F6. 四区组合替换（按布局规格单）
 
-- [ ] F6.1 Mixer 区 —— `ui/main_window.py` mix_box 重建：TRIM×2/EQ 低中高×2/MASTER 用 RotaryKnob（垂直排布）、通道推子×2 + 横推 FaderSlider（横推水平）、VU×2 LedStrip、Tap/Fader Start/耳机 CUE GlowButton；信号接线保持原接口（engine 零改动）
-- [ ] F6.2 Deck 区 —— deck_widget 重建：PLAY/CUE/模式键（HOT CUE/PAD FX/BEAT JUMP/SAMPLER）/SHIFT 换 GlowButton；pad_widget 8 键换 GlowButton + 五模式色；保持 SHIFT 组合与灯态逻辑不变
-- [ ] F6.3 Jog 升级 —— jog_wheel paintEvent 增强：外圈金属渐变环 + 播放时旋转指示点 + 中心区嵌 MiniDisplay（BPM/位置）；搓碟/弯音/搜索交互不变
-- [ ] F6.4 Beat FX 面板 —— beat_fx_widget 重建：通道/效果选择 GlowButton 组、拍数 ± GlowButton + MiniDisplay、DEPTH RotaryKnob、FX ON GlowButton（橙色辉光）
-- [ ] F6.5 Browse 区 —— LOAD A/B/目标盘/SHIFT 换 GlowButton；搜索框 QSS 按新配色适配；布局按规格单
-- [ ] F6.6 逐区截图迭代 —— 每区完成后跑无头截图存 `.temp/ui_preview/layout_vN.png`；AI 直接读图对照参考图自检偏差 → 按规格单数值调整；用户抽查确认视觉
+- [x] F6.1 Mixer 区 —— TRIM/EQ×3/MASTER 换 RotaryKnob、通道推子/横推换 FaderSlider、VU 换 LedStrip、Fader Start/Tap 换 GlowButton；valueChanged 浮点映射直连引擎（原 /100 换算删除）
+- [x] F6.2 Deck 区 —— deck_widget：PLAY/CUE/循环/Beatloop/Keylock 换 GlowButton（播放 LED 橙色）；pad_widget：8 键 + 5 模式键换 GlowButton（35×35，五模式色灯阵）
+- [x] F6.3 Jog 升级 —— 金属渐变外圈 + 播放橙色指示点 + 中心屏（BPM/VINYL 标识），set_playing/set_info 接口由 _tick 驱动
+- [x] F6.4 Beat FX 面板 —— 效果下拉改互斥 GlowButton 组（LED 标识）、拍数改 MiniDisplay、DEPTH 改 RotaryKnob、FX ON/AUTO/TAP 换 GlowButton
+- [x] F6.5 Browse 区 —— LOAD A/B（橙 LED）/目标盘/SHIFT/打开 换 GlowButton
+- [x] F6.6 检验 —— probe_p6：32/32 PASS（原语类型 17 项 + 信号接线 12 项 + 截图 3 项）；冒烟 OK；截图 .temp/ui_preview/layout_v6.png + deck_a/pad_a/beat_fx
+- [x] F6.7 读图对照参考图（2026-08-12 多模态验证：layout_v6.png 四列布局对齐 FLX4，深色面板+控件质感到位，方块字体为 offscreen 模式限制）
 
 ### F7. 验证与收尾
 
-- [ ] F7.1 无头定稿 —— `QT_QPA_PLATFORM=offscreen` 初始化 MainWindow + `grab()` 全窗口截图定稿；冒烟 import 全模块
-- [ ] F7.2 GUI 实测回归 —— 逐项：播放/CUE/循环/变速/转场 + SHIFT 组合键 + 灯态 + 搓碟/弯音 + Beat FX 听感（含 F1-F3 修复复核）；问题进 y.problem.md 新条目
-- [ ] F7.3 连带文档 —— README 使用说明/项目结构（ui/widgets/）、z.plan.md M1.6 勾选、y.problem.md P1-P3 改 ✅、x.progress.md F 系列勾选
-- [ ] F7.4 提交 V0.21（由用户执行，Git 拆分用户决定）
+- [x] F7.1 无头定稿 —— `QT_QPA_PLATFORM=offscreen` 初始化 MainWindow + `grab()` 全窗口截图定稿（layout_final.png 1650×800，多模态读图确认四列布局/深色主题/控件质感到位）；冒烟 import 全模块 + 版本号 ver 0.22
+- [x] F7.2 GUI 实测回归 —— 用户实测确认（2026-08-12）：交互/灯态/SHIFT/听感/F1-F3 复核均 OK；已知不足后续迭代（用户授权先当已实现）
+- [x] F7.3 连带文档 —— README 使用说明/项目结构（ui/widgets/）、z.plan.md M1.6 勾选、y.problem.md P1-P3 改 ✅、x.progress.md F 系列勾选
+- [ ] F7.4 提交 V0.22（由用户执行，Git 拆分用户决定）

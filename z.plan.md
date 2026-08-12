@@ -204,39 +204,39 @@ MrAutoDJ：从虚拟 DJ 台起步，逐步演进为 AI 自动 DJ 与 LLM 电台�
   - [x] **UI 四区布局重排**：Browse 顶栏（LOAD A/B + 搜索）+ 双 Deck + Mixer/Effects，保留 M1 曲库与 Prepare/Mix
   - [x] 集成验证：无头探针 probe_m15 + 端到端 verify_m15 + 冒烟
   - [x] Beat FX 修复：效果/深度/开关统一状态应用；延迟线环形缓冲回绕分段读取
-  - [ ] 待修复问题（y.problem.md，修复轮排在 M1.6 之前）：
-    - [x] P1 Echo 回绕跳读（2026-08-12 已修：删 start 判断恒从块头读；无头验证 + GUI 听测确认）
-    - [x] P2 弯音不归零（2026-08-12 已修：单发 QTimer 累积归零 + 减速插值防卡顿；GUI 实测确认）
-    - [ ] P3 搓碟语义：触摸锁定播放 + 位置跟手 + 释放续播，按 B13-3.16 语义实现
-    - P5 Pitch 滑块无效果（M1 遗留占位）——📌 **V0.21 之后修复**，见 y.problem.md
-- [ ] **M1.6 UI 拟物改版**（V0.21，方案 2026-08-10 与用户讨论定稿；与 P1-P3 修复同属 V0.21，任务明细见 x.progress.md F 系列）
+- [x] 待修复问题（y.problem.md，修复轮排在 M1.6 之前）：
+  - [x] P1 Echo 回绕跳读（2026-08-12 已修：删 start 判断恒从块头读；无头验证 + GUI 听测确认）
+  - [x] P2 弯音不归零（2026-08-12 已修：单发 QTimer 累积归零 + 减速插值防卡顿；GUI 实测确认）
+  - [x] P3 搓碟语义（2026-08-12 已修：触摸锁定 + 平滑变速刮擦 + Slip 落回；GUI 实测确认）
+  - P5 Pitch 滑块无效果（M1 遗留占位）——📌 **V0.21 之后修复**，见 y.problem.md
+- [x] **M1.6 UI 拟物改版**（V0.22，方案 2026-08-10 与用户讨论定稿；2026-08-12 完成，任务明细见 x.progress.md F 系列；V0.21 已被 P1-P3 修复占用故版本顺延）
   > 定位：把 M1.5 的四区布局从"标准 Qt 控件 + QSS"升级为 **QPainter 自绘拟物原语体系**（Mixxx 皮肤同路线），视觉对标 FLX4/Rekordbox 现代硬件面板；只改视觉层，引擎与交互逻辑零改动
-  - [ ] **方案决策**（已定稿）：
+  - [x] **方案决策**（已定稿）：
     - 路线 B：自绘控件原语库——QSS 堆质感做不出旋钮/推子，治标不治本；不做 SVG 贴图（素材重活）与 QML 重构（现有代码作废）
     - 风格：现代 DJ 台质感——深灰蓝黑金属面板 + 内凹槽 + 丝印标题 + 橙/蓝/绿/白背光（Pioneer 色系）
     - 原则：原语控件零业务依赖（不 import modules/），只做外观与交互、只发信号；业务逻辑留在现有 deck_widget/beat_fx_widget/pad_widget 组合层
     - 性能：静态层（面板纹理/刻度环/凹槽）一次渲染到 QPixmap 缓存，paintEvent 只 blit + 重绘动态部件；灯态沿用定时器低频刷新，不碰实时音频线程
-  - [ ] **配色体系**（token 进 ui.json）：panel_base/panel_edge/panel_inset/silk_text、glow_orange/blue/green/white、pad_color[5]（五模式色）
-  - [ ] **控件原语库** `ui/widgets/`（全 paintEvent 自绘）：
+  - [x] **配色体系**（token 进 ui.json）：panel_base/panel_edge/panel_inset/silk_text、glow_orange/blue/green/white、pad_color[5]（五模式色）
+  - [x] **控件原语库** `ui/widgets/`（全 paintEvent 自绘）：
     - RotaryKnob 旋钮（刻度环+指针+中心帽；垂直拖拽/滚轮/双击复位）→ TRIM/EQ×3/MASTER/LEVEL/DEPTH
     - FaderSlider 推子（内凹槽+中央刻度线+拉丝金属帽）→ 通道推子×2/横推/Tempo（Tempo 带量程标签 ±6/10/16/WIDE）
     - GlowButton 背光按钮（内凹座+按压辉光+LED 灯态+模式色）→ 全按钮/LOAD/Pad/模式键
     - LedStrip LED 灯柱（分段亮起 绿→黄→红）→ VU 表替换/Beat FX 拍数指示
     - MiniDisplay 小屏（黑底+绿字 7 段数字感）→ BPM/拍数/曲名
     - PanelFrame 面板容器（渐变底+圆角+顶部高光+丝印标题）→ 四区容器
-  - [ ] **组合替换映射**：Mixer 区（PanelFrame + RotaryKnob×6 + FaderSlider×3 + LedStrip×2 + GlowButton）／Deck 区（PanelFrame + GlowButton + Jog 升级为金属圈+指示环+中心屏 + Pad 背光化）／Beat FX（PanelFrame + RotaryKnob + MiniDisplay + LedStrip）／Browse（PanelFrame + GlowButton）
-  - [ ] **布局核对机制**（与用户双向可核对，2026-08-11 更新为多模态主模型路线）：
+  - [x] **组合替换映射**：Mixer 区（PanelFrame + RotaryKnob×6 + FaderSlider×3 + LedStrip×2 + GlowButton）／Deck 区（PanelFrame + GlowButton + Jog 升级为金属圈+指示环+中心屏 + Pad 背光化）／Beat FX（PanelFrame + RotaryKnob + MiniDisplay + LedStrip）／Browse（PanelFrame + GlowButton）
+  - [x] **布局核对机制**（与用户双向可核对，2026-08-11 更新为多模态主模型路线）：
     - 布局规格单 `docs/ui_layout.md`：ASCII 布局图 + 部件表格（位置/尺寸/间距/对齐），每次改动先更新，双方核对单一真相源，防口口相传走样
     - 无头渲染截图：`QT_QPA_PLATFORM=offscreen` + `widget.grab()` → `.temp/ui_preview/layout_vN.png`（不进 git），每轮布局改动自动出图；**主模型换为多模态后 AI 可直接读图核对**（与用户可见效果一致），仍需用户确认最终视觉
     - 用户反馈方式：ASCII 布局图／文字描述／截图标注 → 1px 级迭代
     - 布局意图来源：参照 FLX4 面板实物/官方图（用户提供参考图到 `.temp/design_ref/`，或 FLX4 官方面板图）+ B13 部件清单 + 用户口述偏好，均先转成布局规格单再实现
-  - [ ] **实施顺序**（每步独立可验证、可回退）：
+  - [x] **实施顺序**（每步独立可验证、可回退）：
     - Step 1：ui.json 配色 token + PanelFrame + RotaryKnob + GlowButton 三个原语
     - Step 2：替换 Mixer 区（旋钮密集区，效果立竿见影）+ 无头截图核对
     - Step 3：FaderSlider + 替换推子/Tempo
     - Step 4：Jog 转盘视觉升级 + Pad/Beat FX 背光化
     - Step 5：全量替换 + 无头初始化验证 + 截图定稿；提交（Git 拆分由用户决定）
-  - [ ] 集成验证：无头初始化 + 无头截图 + 冒烟；GUI 实测核对背光/灯态交互
+  - [x] 集成验证：无头初始化 + 无头截图 + 冒烟；GUI 实测核对背光/灯态交互
 - [ ] **M2 第二步：AI 自动 DJ**
   - [ ] 兼容性评分：BPM 倍频归一化 / Camelot 档位 / 能量曲线 / 音色 / 人声冲突
   - [ ] 调和混音（Camelot 轮盘）选曲与 Set 规划（同艺人约束/去重/能量弧线）

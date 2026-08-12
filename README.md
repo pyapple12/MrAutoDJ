@@ -1,6 +1,6 @@
 # MrAutoDJ —— 虚拟 DJ 台与 AI 电台
 
-[![Version](https://img.shields.io/badge/Version-ver%200.21-blue.svg)](config/static/base.json)
+[![Version](https://img.shields.io/badge/Version-ver%200.22-blue.svg)](config/static/base.json)
 [![Python](https://img.shields.io/badge/Python-3.14+-green.svg)](https://www.python.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -48,6 +48,10 @@ GUI 基于 PySide6，音频引擎基于 python-sounddevice 实时回调，分析
   - Mixer 补全：TRIM / VU 表 / Fader Start / Tap BPM
   - 表演功能：Censor / Stutter / Instant Doubles
   - 全局 SHIFT 组合键体系
+- **UI 拟物改版（M1.6，V0.22）**：
+  - QPainter 自绘拟物原语库（ui/widgets/）：RotaryKnob 旋钮 / FaderSlider 推子 / GlowButton 背光按钮 / LedStrip 灯柱 / MiniDisplay 小屏 / PanelFrame 面板
+  - FLX4 五列布局：LIBRARY | DECK A | MIXER | DECK B | EFFECTS，深色金属面板 + 背光体系
+  - 修复轮：Echo 回绕跳读、弯音归零、搓碟语义（平滑变速刮擦）
 - **AI 自动 DJ（M2）**：
   - 调和混音（Camelot 轮盘）选曲
   - 节拍对齐自动转场（EQ 渐变）
@@ -124,15 +128,22 @@ MrAutoDJ/
 │       ├── base.json          # 应用参数（版本/采样率/块大小/缓存路径等）
 │       └── ui.json            # UI 参数（颜色/阈值/表头）
 ├── ui/                        # GUI 层（PySide6）
-│   ├── main_window.py         # 主窗口（四区布局：Browse + 双 Deck + Mixer/Effects）
+│   ├── main_window.py         # 主窗口（五列布局：LIBRARY + 双 Deck + Mixer + Effects）
 │   ├── deck_widget.py         # 打碟机控件
 │   ├── waveform_widget.py     # 波形绘制
-│   ├── jog_wheel.py           # Jog 转盘（弯音/搓碟/搜索/Vinyl）
+│   ├── jog_wheel.py           # Jog 转盘（弯音/搓碟/搜索/Vinyl/中心屏）
 │   ├── pad_widget.py          # 打击垫（5 模式 + 灯态）
 │   ├── beat_fx_widget.py      # Beat FX 面板
-│   ├── vu_meter.py            # VU 电平表
+│   ├── vu_meter.py            # VU 电平表（旧，已由 LedStrip 替代）
 │   ├── shift_state.py         # 全局 SHIFT 修饰状态
-│   └── themes.py              # 主题 QSS
+│   ├── themes.py              # 主题 QSS
+│   └── widgets/               # 拟物原语控件库（QPainter 自绘，零业务依赖）
+│       ├── panel_frame.py     # 面板容器（渐变+高光+丝印标题）
+│       ├── rotary_knob.py     # 旋钮（刻度环+指针，拖拽/滚轮/双击复位）
+│       ├── glow_button.py     # 背光按钮（辉光+LED 灯态+模式色）
+│       ├── fader_slider.py    # 推子（凹槽+金属帽）
+│       ├── led_strip.py       # LED 灯柱（绿黄红分带）
+│       └── mini_display.py    # 小屏（黑底绿字）
 ├── data/                      # 静态数据（预留）
 ├── utils/                     # 通用工具（零业务依赖）
 │   ├── logger.py              # 统一日志（控制台 + 文件）
@@ -143,8 +154,9 @@ MrAutoDJ/
 ├── tools/rubberband/          # 内置变速引擎（GPL 便携构建，兜底方案，随仓库分发）
 ├── z.plan.md                  # 项目规划与里程碑
 ├── w.study.md                 # 源码研读报告（含 B13 FLX4 学习报告）
-├── x.progress.md              # 任务清单（D/E 系列）
-├── y.problem.md               # 已知问题记录（P1-P3 待评估）
+├── x.progress.md              # 任务清单（D/E/F 系列）
+├── y.problem.md               # 已知问题记录（P1-P5）
+├── docs/ui_layout.md          # 布局规格单（FLX4 四区 ASCII + 部件表）
 ├── requirements.txt           # Python 依赖列表
 ├── LICENSE                    # MIT 许可证
 └── README.md                  # 本文件

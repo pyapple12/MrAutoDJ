@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QElapsedTimer, QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import QCheckBox, QLabel, QVBoxLayout, QWidget
 
 from config.static.static_config import get_static_config
@@ -36,6 +36,8 @@ class JogWheel(QWidget):
         self._touched = False
         self._last_pos: QPointF | None = None
         self._scratch_timer = QElapsedTimer()  # 搓碟速度测量（P3 增益标定）
+        self._playing = False  # 播放状态（顶部指示点，F6.3）
+        self._info_text = ""  # 中心屏文本（BPM/位置，F6.3）
         self.shift: object | None = None  # ShiftState 实例（MainWindow 注入）
 
         row = QVBoxLayout(self)
@@ -111,23 +113,65 @@ class JogWheel(QWidget):
 
     # --- 绘制 ---
 
+    def set_playing(self, playing: bool) -> None:
+        # 播放状态（顶部旋转指示点 + 中心文本高亮，MainWindow _tick 驱动）
+        if playing != self._playing:
+            self._playing = playing
+            self.update()
+
+    def set_info(self, text: str) -> None:
+        # 中心屏文本（BPM/位置，MainWindow _tick 驱动）
+        if text != self._info_text:
+            self._info_text = text
+            self.update()
+
     def paintEvent(self, event) -> None:
-        # 绘制圆盘：外圈（弯音区）+ 顶面（搓碟区）+ 中心标识
+        # 绘制圆盘：金属外圈（弯音区）+ 顶面（搓碟区）+ 中心屏文本 + 播放指示点
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
         center = QPointF(w / 2, h / 2)
         r_out = min(w, h) / 2 - 2
-        r_in = r_out * 0.62
+        r_in = r_out * 0.66
         bg = QColor(str(_UI_COLORS.get("background", "#0d0d0d")))
         ring = QColor(str(_UI_COLORS.get("accent", "#00ff41")))
-        plate = QColor("#1a1a1a")
+        # 外圈金属渐变环（F6.3）
+        metal = QLinearGradient(0, 0, w, h)
+        metal.setColorAt(0.0, QColor(210, 214, 220))
+        metal.setColorAt(0.5, QColor(150, 154, 160))
+        metal.setColorAt(1.0, QColor(110, 114, 120))
         painter.fillRect(self.rect(), bg)
-        painter.setBrush(plate)
+        painter.setBrush(metal)
+        painter.setPen(QPen(QColor(60, 64, 70), 2))
+        painter.drawEllipse(center, r_out, r_out)  # 金属外圈
+        # 顶面（搓碟区）：深灰内盘 + 细分圆
+        painter.setBrush(QColor("#1a1a1a"))
         painter.setPen(QPen(ring, 2))
-        painter.drawEllipse(center, r_out, r_out)  # 外圈
-        painter.drawEllipse(center, r_in, r_in)  # 顶面
-        painter.setPen(QPen(ring, 1))
-        painter.drawText(self.rect(), Qt.AlignCenter, "JOG")
+        painter.drawEllipse(center, r_in, r_in)
+        painter.setPen(QPen(QColor(90, 94, 100), 1))
+        painter.drawEllipse(center, r_in * 0.86, r_in * 0.86)
+        # 播放指示点（顶部，播放时亮橙色）
+        if self._playing:
+            painter.setBrush(QColor("#ff7a2f"))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(QPointF(w / 2, h / 2 - r_in * 0.72), 3, 3)
+        # 中心屏文本（BPM/位置）
+        painter.setPen(QColor("#e8ecf0"))
+        font = painter.font()
+        font.setBold(True)
+        font.setPointSizeF(9)
+        painter.setFont(font)
+        painter.drawText(
+            QRectF(w / 2 - r_in * 0.7, h / 2 - 12, r_in * 1.4, 16),
+            Qt.AlignCenter,
+            self._info_text or "JOG",
+        )
+        painter.setPen(QColor("#8a9099"))
+        painter.drawText(
+            QRectF(w / 2 - r_in * 0.7, h / 2 + 4, r_in * 1.4, 12),
+            Qt.AlignCenter,
+            "VINYL" if self._vinyl else "CDJ",
+        )
         painter.end()
 
 

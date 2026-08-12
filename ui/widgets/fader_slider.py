@@ -1,0 +1,170 @@
+# FaderSlider 推子：内凹槽 + 两端刻度 + 中央线 + 金属帽（垂直/水平）
+# 交互：拖拽（点击跳转）、滚轮步进、双击回中；valueChanged(float) 信号
+
+from __future__ import annotations
+
+from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen
+from PySide6.QtWidgets import QWidget
+
+from config.static.static_config import get_static_config
+
+# 静态配置解包（推子配色）
+_SC = get_static_config()
+_UI = _SC.ui
+_PANEL_INSET = QColor(_UI.get("panel_inset", "#101215"))
+_PANEL_EDGE = QColor(_UI.get("panel_edge", "#26292f"))
+_SILK = QColor(_UI.get("silk_text", "#8a9099"))
+_TRAVEL = 100.0  # 拖拽像素 → 全程
+
+
+class FaderSlider(QWidget):
+    # 推子：值域 [min,max]，帽位置线性映射；垂直或水平
+    valueChanged = Signal(float)
+
+    def __init__(
+        self,
+        min_value: float = 0.0,
+        max_value: float = 1.0,
+        default: float = 0.5,
+        orientation: Qt.Orientation = Qt.Vertical,
+        length: int = 120,
+        parent=None,
+    ):
+        # 初始化：值域/方向/固定长度；垂直宽 24、水平高 24
+        super().__init__(parent)
+        self._min = min_value
+        self._max = max_value
+        self._default = default
+        self._value = default
+        self._orientation = orientation
+        if orientation == Qt.Vertical:
+            self.setFixedSize(24, length)
+        else:
+            self.setFixedSize(length, 24)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def value(self) -> float:
+        # 当前值
+        return self._value
+
+    def set_value(self, v: float) -> None:
+        # 设置值（钳制，变化才发信号与重绘）
+        v = max(self._min, min(self._max, float(v)))
+        if abs(v - self._value) < 1e-9:
+            return
+        self._value = v
+        self.update()
+        self.valueChanged.emit(v)
+
+    # --- 几何换算 ---
+
+    def _ratio(self) -> float:
+        # 值 → 0..1 行程比例
+        return (self._value - self._min) / (self._max - self._min)
+
+    def _set_from_pos(self, pos) -> None:
+        # 位置 → 值（垂直：y 从底部起算；水平：x 从左起算）
+        if self._orientation == Qt.Vertical:
+            h = max(self.height() - 14.0, 1.0)
+            r = 1.0 - (pos.y() - 7.0) / h
+        else:
+            w = max(self.width() - 14.0, 1.0)
+            r = (pos.x() - 7.0) / w
+        self.set_value(self._min + max(0.0, min(1.0, r)) * (self._max - self._min))
+
+    # --- 交互 ---
+
+    def mousePressEvent(self, event) -> None:
+        # 按下：跳到点击位置（推子直跳语义）
+        self._set_from_pos(event.position())
+        event.accept()
+
+    def mouseMoveEvent(self, event) -> None:
+        # 拖动：跟随位置
+        self._set_from_pos(event.position())
+        event.accept()
+
+    def wheelEvent(self, event) -> None:
+        # 滚轮步进：全程 /20
+        step = (self._max - self._min) / 20.0
+        self.set_value(self._value + (step if event.angleDelta().y() > 0 else -step))
+        event.accept()
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        # 双击回中（(min+max)/2）
+        self.set_value((self._min + self._max) / 2.0)
+        event.accept()
+
+    # --- 绘制 ---
+
+    def paintEvent(self, event) -> None:
+        # 静态槽/刻度 + 动态金属帽（位置 = 值映射）
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        vertical = self._orientation == Qt.Vertical
+        w, h = self.width(), self.height()
+        # 凹槽（内阴影感：inset 底 + 上下深线）
+        if vertical:
+            groove = QRectF(w / 2.0 - 3.0, 4.0, 6.0, h - 8.0)
+        else:
+            groove = QRectF(4.0, h / 2.0 - 3.0, w - 8.0, 6.0)
+        p.setPen(QPen(QColor(0, 0, 0, 120), 1))
+        p.setBrush(_PANEL_INSET)
+        p.drawRoundedRect(groove, 3, 3)
+        # 中央线（刻度中点）
+        p.setPen(QPen(_SILK, 1))
+        if vertical:
+            p.drawLine(
+                int(w / 2.0),
+                int(groove.top() + groove.height() * 0.5),
+                int(w / 2.0),
+                int(groove.top() + groove.height() * 0.5) + 4,
+            )
+        else:
+            p.drawLine(
+                int(groove.left() + groove.width() * 0.5),
+                int(h / 2.0),
+                int(groove.left() + groove.width() * 0.5) + 4,
+                int(h / 2.0),
+            )
+        # 金属帽（垂直渐变 + 顶部高光棱）
+        r = self._ratio()
+        if vertical:
+            cap = QRectF(3.0, 2.0 + (h - 16.0) * (1.0 - r), 18.0, 12.0)
+        else:
+            cap = QRectF(2.0 + (w - 16.0) * r, 3.0, 12.0, 18.0)
+        cap_grad = QLinearGradient(0, cap.top(), 0, cap.bottom())
+        cap_grad.setColorAt(0.0, QColor(200, 204, 210))
+        cap_grad.setColorAt(0.5, QColor(150, 154, 160))
+        cap_grad.setColorAt(1.0, QColor(110, 114, 120))
+        p.setBrush(cap_grad)
+        p.setPen(QPen(QColor(60, 64, 70), 1))
+        p.drawRoundedRect(cap, 3, 3)
+        # 帽顶高光线
+        p.setPen(QPen(QColor(255, 255, 255, 110), 1))
+        if vertical:
+            p.drawLine(
+                int(cap.left() + 2),
+                int(cap.top() + 1),
+                int(cap.right() - 2),
+                int(cap.top() + 1),
+            )
+        else:
+            p.drawLine(
+                int(cap.left() + 1),
+                int(cap.top() + 2),
+                int(cap.left() + 1),
+                int(cap.bottom() - 2),
+            )
+        p.end()
+
+
+# ===== ui/widgets/fader_slider.py 模块说明 =====
+# 类：FaderSlider(QWidget)——拟物推子（垂直/水平）
+#   value()/set_value(v)：值域钳制 + valueChanged；_ratio/_set_from_pos 几何换算
+#   交互：按下直跳、拖动跟随、滚轮全程/20、双击回中
+#   绘制：内凹槽 + 中央刻度线 + 金属帽（渐变 + 高光棱），帽位置随值
+# 设计理由：推子"直跳"语义（DJ 台推子点哪到哪，区别于平滑滑杆）；
+#   金属帽渐变模拟拉丝质感（M1.6 规格单）
+# 关联配置：config/static/ui.json（panel_inset/panel_edge/silk_text）
