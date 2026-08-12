@@ -64,16 +64,19 @@ class GlowButton(QAbstractButton):
             p.fillPath(path, QColor(glow.red(), glow.green(), glow.blue(), 60))
             p.setPen(QPen(QColor(glow.red(), glow.green(), glow.blue(), 220), 1))
             p.drawPath(path)
-            text_color = QColor(255, 255, 255)
+            text_color = _GLOW_WHITE  # H3.3：统一 token（原纯白与 glow_white 不一致）
         else:
             # 常态：内凹座（inset 底 + 底缘深线模拟凹入）
             p.fillPath(path, _PANEL_INSET)
             p.setPen(QPen(QColor(0, 0, 0, 100), 1))
             p.drawPath(path)
             text_color = _SILK
-        # 文字居中
+        # 文字居中（H3.5：超宽文本省略号，防溢出圆角）
         p.setPen(text_color)
-        p.drawText(rect, Qt.AlignCenter, self.text())
+        elided = p.fontMetrics().elidedText(
+            self.text(), Qt.ElideRight, int(rect.width() - 6)
+        )
+        p.drawText(rect, Qt.AlignCenter, elided)
         p.end()
 
 

@@ -8,38 +8,44 @@ from config.static.static_config import get_static_config
 
 # 静态配置解包（主题颜色，AGENTS.md 参数约定）
 _SC = get_static_config()
+_UI = _SC.ui
 
 
 def _build_qss(colors: dict) -> str:
     # 由颜色表生成深色 QSS：背景/前景/强调色 + 通用控件样式
+    # H2.3：QSS 内全部颜色 token 化（panel_base/panel_edge/panel_inset 等），
+    # 消除硬编码色值（原说明区"颜色零硬编码"与实现矛盾已修复）
     bg = colors.get("background", "#0d0d0d")
     fg = colors.get("accent", "#00ff41")
     warn = colors.get("warning", "#ffcc00")
     deck_a = colors.get("deck_a", "#00cccc")
     deck_b = colors.get("deck_b", "#cccc00")
+    inset = _UI.get("panel_inset", "#101215")
+    edge = _UI.get("panel_edge", "#26292f")
+    base = _UI.get("panel_base", "#1c1e22")
     return f"""
     QMainWindow, QWidget {{ background: {bg}; color: {fg}; }}
     QLabel {{ color: {fg}; }}
     QPushButton {{
-        background: #1a1a1a; color: {fg}; border: 1px solid #2a2a2a;
+        background: {inset}; color: {fg}; border: 1px solid {edge};
         border-radius: 3px; padding: 4px 10px;
     }}
-    QPushButton:hover {{ background: #222222; }}
-    QPushButton:checked {{ background: {deck_a}; color: #0d0d0d; }}
+    QPushButton:hover {{ background: {edge}; }}
+    QPushButton:checked {{ background: {deck_a}; color: {bg}; }}
     QCheckBox {{ color: {fg}; }}
     QSlider::groove:horizontal {{
-        height: 4px; background: #2a2a2a; border-radius: 2px;
+        height: 4px; background: {edge}; border-radius: 2px;
     }}
     QSlider::handle:horizontal {{
         width: 12px; margin: -4px 0; border-radius: 6px;
         background: {fg};
     }}
     QTableWidget {{
-        background: #111111; color: {fg}; gridline-color: #222222;
-        border: 1px solid #2a2a2a;
+        background: {base}; color: {fg}; gridline-color: {edge};
+        border: 1px solid {edge};
     }}
-    QTableWidget::item:selected {{ background: #003300; }}
-    QLineEdit {{ background: #111111; color: {fg}; border: 1px solid #2a2a2a; }}
+    QTableWidget::item:selected {{ background: {deck_b}; }}
+    QLineEdit {{ background: {base}; color: {fg}; border: 1px solid {edge}; }}
     QStatusBar {{ color: {warn}; }}
     """
 
@@ -54,8 +60,9 @@ def apply_theme(app: QApplication, theme: str = "dark") -> None:
 
 # ===== ui/themes.py 模块说明 =====
 # 函数：
-#   _build_qss(colors)：由颜色表生成深色 QSS 字符串（背景/前景/强调色/通用控件）
+#   _build_qss(colors)：由颜色表生成深色 QSS 字符串（背景/前景/强调色/通用控件；
+#     H2.3 起控件底色/边框全部引用 ui.json token：panel_inset/panel_edge/panel_base）
 #   apply_theme(app, theme)：应用主题（M1 仅深色；颜色来自 config/static/ui.json）
-# 设计理由：颜色零硬编码（AGENTS.md 参数约定，ui.json 为唯一来源）；
+# 设计理由：颜色全部 token 化（AGENTS.md 参数约定，ui.json 为唯一来源）；
 #   QSS 模板化便于后续浅色主题扩展
-# 关联配置：config/static/ui.json（colors.*）
+# 关联配置：config/static/ui.json（colors.* + panel_inset/panel_edge/panel_base）

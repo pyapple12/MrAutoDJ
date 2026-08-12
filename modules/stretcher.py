@@ -164,6 +164,34 @@ def _run_rubberband(
         raise RuntimeError(f"rubberband failed (exit {rc})")
 
 
+def _render_via_cli(
+    audio: np.ndarray,
+    sample_rate: int,
+    args_fn: Callable[[str], list[str]],
+    prefix: str,
+    progress_callback: Callable[[float], None] | None = None,
+) -> np.ndarray:
+    # 公共渲染管道（H1.4）：tmpdir → 写 in.wav → 组命令 → 运行 → 读回校验 → 清理
+    # args_fn(tmpdir) 返回额外命令行参数（如 -M timemap / --pitch）；prefix 为临时目录前缀
+    if audio.ndim != 2 or audio.shape[1] != 2:
+        raise ValueError(f"expected stereo (N, 2) audio, got shape {audio.shape}")
+    tmpdir = tempfile.mkdtemp(prefix=prefix)
+    in_path = os.path.join(tmpdir, "in.wav")
+    out_path = os.path.join(tmpdir, "out.wav")
+    try:
+        sf.write(in_path, audio, sample_rate, subtype="FLOAT")
+        cmd = [rubberband_bin(), "-3"] + args_fn(tmpdir) + [in_path, out_path]
+        _run_rubberband(cmd, progress_callback)
+        out, sr = sf.read(out_path, dtype="float32", always_2d=True)
+        if sr != sample_rate:
+            raise RuntimeError(f"rubberband returned wrong sample rate {sr}")
+        if out.shape[1] == 1:
+            out = np.repeat(out, 2, axis=1)
+        return out.astype(np.float32)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def make_transition_buffer(
     audio: np.ndarray,
     start_rate: float,
@@ -173,9 +201,6 @@ def make_transition_buffer(
     progress_callback: Callable[[float], None] | None = None,
 ) -> np.ndarray:
     # 变速渲染整段来曲余量：fade 秒恒速 start_rate → restore 秒 smootherstep 回 1.0 → 1.0 到结尾
-    if audio.ndim != 2 or audio.shape[1] != 2:
-        raise ValueError(f"expected stereo (N, 2) audio, got shape {audio.shape}")
-
     fade_samples = int(round(fade_seconds * sample_rate))
     restore_samples = int(round(restore_seconds * sample_rate))
 
@@ -183,46 +208,16 @@ def make_transition_buffer(
     total_output_samples = timemap[-1][1]
     total_duration_s = total_output_samples / sample_rate
 
-    tmpdir = tempfile.mkdtemp(prefix="mrautodj_rb_")
-    in_path = os.path.join(tmpdir, "in.wav")
-    out_path = os.path.join(tmpdir, "out.wav")
-    map_path = os.path.join(tmpdir, "timemap.txt")
-    try:
-        sf.write(in_path, audio, sample_rate, subtype="FLOAT")
+    def _args(tmpdir: str) -> list[str]:
+        # 写 timemap 文件并返回 -M/-D 参数（-3=R3；-M=timemap（-T 是恒速，勿混）；
+        # -D=输出总时长（必配，否则不拉伸））
+        map_path = os.path.join(tmpdir, "timemap.txt")
         with open(map_path, "w") as f:
             for in_f, out_f in timemap:
                 f.write(f"{in_f} {out_f}\n")
+        return ["--centre-focus", "-M", map_path, "-D", f"{total_duration_s:.6f}"]
 
-        # -3=R3 高质量引擎；-M=timemap（-T 是恒速，勿混）；-D=输出总时长（必配，否则不拉伸）
-        cmd = [
-            rubberband_bin(),
-            "-3",
-            "--centre-focus",
-            "-M",
-            map_path,
-            "-D",
-            f"{total_duration_s:.6f}",
-            in_path,
-            out_path,
-        ]
-        _run_rubberband(cmd, progress_callback)
-
-        out, sr = sf.read(out_path, dtype="float32", always_2d=True)
-        if sr != sample_rate:
-            raise RuntimeError(f"rubberband returned wrong sample rate {sr}")
-        if out.shape[1] == 1:
-            out = np.repeat(out, 2, axis=1)
-        return out.astype(np.float32)
-    finally:
-        for p in (in_path, out_path, map_path):
-            try:
-                os.remove(p)
-            except OSError:
-                pass
-        try:
-            os.rmdir(tmpdir)
-        except OSError:
-            pass
+    return _render_via_cli(audio, sample_rate, _args, "mrautodj_rb_", progress_callback)
 
 
 def make_keylock_buffer(
@@ -231,41 +226,13 @@ def make_keylock_buffer(
     sample_rate: int = 44100,
     progress_callback: Callable[[float], None] | None = None,
 ) -> np.ndarray:
-    # 变调不变速（Keylock）：rubberband -p 半音（保持时长，仅移动音高）
-    if audio.ndim != 2 or audio.shape[1] != 2:
-        raise ValueError(f"expected stereo (N, 2) audio, got shape {audio.shape}")
+    # 变调不变速（Keylock）：rubberband --pitch 半音（保持时长，仅移动音高）
+    def _args(tmpdir: str) -> list[str]:
+        return ["--pitch", f"{semitones:.3f}"]
 
-    tmpdir = tempfile.mkdtemp(prefix="mrautodj_keylock_")
-    in_path = os.path.join(tmpdir, "in.wav")
-    out_path = os.path.join(tmpdir, "out.wav")
-    try:
-        sf.write(in_path, audio, sample_rate, subtype="FLOAT")
-        cmd = [
-            rubberband_bin(),
-            "-3",
-            "--pitch",
-            f"{semitones:.3f}",
-            in_path,
-            out_path,
-        ]
-        _run_rubberband(cmd, progress_callback)
-
-        out, sr = sf.read(out_path, dtype="float32", always_2d=True)
-        if sr != sample_rate:
-            raise RuntimeError(f"rubberband returned wrong sample rate {sr}")
-        if out.shape[1] == 1:
-            out = np.repeat(out, 2, axis=1)
-        return out.astype(np.float32)
-    finally:
-        for p in (in_path, out_path):
-            try:
-                os.remove(p)
-            except OSError:
-                pass
-        try:
-            os.rmdir(tmpdir)
-        except OSError:
-            pass
+    return _render_via_cli(
+        audio, sample_rate, _args, "mrautodj_keylock_", progress_callback
+    )
 
 
 # ===== modules/stretcher.py 模块说明 =====

@@ -10,15 +10,12 @@ from typing import Callable
 import numpy as np
 
 from config.static.static_config import get_static_config
-from modules.engine import SAMPLE_RATE, State
-from modules.stretcher import make_transition_buffer
+from modules.engine import KEY_SHIFT_MAX, SAMPLE_RATE, State
+from modules.stretcher import make_keylock_buffer, make_transition_buffer
 from modules.transition import TransitionPlan, plan_transition
 
 # 静态配置解包（对齐点余量：下拍触发前的最短提前量，秒）
 _SC = get_static_config()
-
-# Key Shift 半音上限（G1.3：与 engine 共用同一配置键，防双处漂移）
-_KEY_SHIFT_MAX = int(_SC.base.get("key_shift_max", 12))
 
 # 混音触发提前量：对齐点必须晚于当前播放位置 + 此余量（避免触发点在当前帧内）
 MIX_TRIGGER_MARGIN_SECONDS = float(_SC.base.get("mix_trigger_margin_seconds", 0.1))
@@ -27,6 +24,49 @@ MIX_TRIGGER_MARGIN_SECONDS = float(_SC.base.get("mix_trigger_margin_seconds", 0.
 DEFAULT_FADE_SECONDS = float(_SC.base.get("default_fade_seconds", 16.0))
 # 变速恢复时长（秒，B1 默认 30s：STRETCH 缓冲渐变回原速的时长）
 DEFAULT_RESTORE_SECONDS = float(_SC.base.get("default_restore_seconds", 30.0))
+
+
+def _prepare_work(manager, next_path: str, my_epoch: int, plan: TransitionPlan) -> None:
+    # 预备后台线程（H3.2：原 prepare 内嵌套闭包 _work 提升为模块级函数）：
+    # 解码 → 切 CUE → SKIP 原始缓冲 / STRETCH 变速渲染 → Key Shift 变调 →
+    # epoch 校验后安装结果并回调 on_done(plan, error)
+    try:
+        audio = manager._engine.load_audio(next_path)
+        cue_audio = audio[manager._cue_sample :]
+        if plan.skip:
+            buf = cue_audio
+        else:
+            buf = make_transition_buffer(
+                cue_audio,
+                plan.start_rate,
+                manager._fade_seconds,
+                manager._restore_seconds,
+                sample_rate=SAMPLE_RATE,
+            )
+        # Key Shift：变速后按半音变调（Keylock 管线扩展）
+        if manager._key_shift != 0:
+            buf = make_keylock_buffer(
+                buf, float(manager._key_shift), sample_rate=SAMPLE_RATE
+            )
+        with manager._lock:
+            if manager._prep_epoch != my_epoch:
+                return  # 已被新预备/参数变更取代，丢弃结果
+            manager._next_prepared = buf
+            manager._next_plan = plan
+            manager._preparing = False
+            cb = manager._on_prepared
+        if cb is not None:
+            cb(plan, None)
+    except Exception as exc:
+        with manager._lock:
+            if manager._prep_epoch != my_epoch:
+                return
+            manager._preparing = False
+            manager._next_prepared = None
+            manager._next_plan = None
+            cb = manager._on_prepared
+        if cb is not None:
+            cb(None, exc)
 
 
 class TransitionManager:
@@ -120,51 +160,11 @@ class TransitionManager:
             self._cue_sample = int(cue_seconds * SAMPLE_RATE)
             self._fade_seconds = fade_seconds
             self._restore_seconds = restore_seconds
-            self._key_shift = max(-_KEY_SHIFT_MAX, min(_KEY_SHIFT_MAX, int(key_shift)))
+            self._key_shift = max(-KEY_SHIFT_MAX, min(KEY_SHIFT_MAX, int(key_shift)))
 
-        def _work() -> None:
-            # 后台线程：解码 → 切 CUE → SKIP 原始缓冲 / STRETCH 变速渲染 → Key Shift 变调
-            try:
-                audio = self._engine.load_audio(next_path)
-                cue_audio = audio[self._cue_sample :]
-                if plan.skip:
-                    buf = cue_audio
-                else:
-                    buf = make_transition_buffer(
-                        cue_audio,
-                        plan.start_rate,
-                        self._fade_seconds,
-                        self._restore_seconds,
-                        sample_rate=SAMPLE_RATE,
-                    )
-                # Key Shift：变速后按半音变调（Keylock 管线扩展）
-                if self._key_shift != 0:
-                    from modules.stretcher import make_keylock_buffer
-
-                    buf = make_keylock_buffer(
-                        buf, float(self._key_shift), sample_rate=SAMPLE_RATE
-                    )
-                with self._lock:
-                    if self._prep_epoch != my_epoch:
-                        return  # 已被新预备/参数变更取代，丢弃结果
-                    self._next_prepared = buf
-                    self._next_plan = plan
-                    self._preparing = False
-                    cb = self._on_prepared
-                if cb is not None:
-                    cb(plan, None)
-            except Exception as exc:
-                with self._lock:
-                    if self._prep_epoch != my_epoch:
-                        return
-                    self._preparing = False
-                    self._next_prepared = None
-                    self._next_plan = None
-                    cb = self._on_prepared
-                if cb is not None:
-                    cb(None, exc)
-
-        threading.Thread(target=_work, daemon=True).start()
+        threading.Thread(
+            target=_prepare_work, args=(self, next_path, my_epoch, plan), daemon=True
+        ).start()
         return True
 
     # --- D3.2 混音 ---
@@ -224,5 +224,3 @@ class TransitionManager:
 # 异常处理：解码/渲染失败 → on_done(None, exc) + 清状态（不崩溃）；
 #   陈旧 worker 结果静默丢弃（不回调）
 # 关联配置：config/static/base.json（sample_rate）；transition.py/stretcher.py 复用
-
-

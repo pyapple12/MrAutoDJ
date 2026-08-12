@@ -324,80 +324,97 @@ Mixxx（架构参照）、pyCrossfade、ai-remixmate、radio-dj、WrzDJ（点歌
 
 ---
 
-## 附录：全量代码审计报告（2026-08-12）
+## 附录 A001：全量代码审计报告（第一轮，2026-08-12）
 
-> 范围：全部 25 个 .py + 3 个 JSON 配置（main.py / utils×5 / config×3 / modules×8 / ui×10 / ui/widgets×6）
-> 方式：三路并行只读审计（utils/config、modules、ui），信号接线全量核对无类型失配；未修改任何代码
-> 状态：✅ **P0-P3 已全部修复**（2026-08-12 G 系列完成，见 x.progress.md；probe_g0-g3 + 全量回归 9/9 PASS + GUI 实测确认；后续多轮审计迭代中）
+> 范围：全部 25 个 .py + 3 个 JSON；三路并行只读审计（utils/config、modules、ui），信号接线全量核对无类型失配
+> 状态：✅ **P0-P3 已全部修复**（2026-08-12 G 系列完成，见 x.progress.md；probe_g0-g3 + 全量回归 9/9 PASS + GUI 实测确认）
 
-### 一、重复造轮子专项（14 处，本次审计重点）
+### 一、重复造轮子（14 处，审计重点）
 
-| #   | 重复点                                                         | 位置                                                                         | 后果                                                                              |
-| --- | -------------------------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| 1   | pydub 解码+归一化                                              | engine.load_audio vs analyzer._decode_mono                                   | 归一化策略不一致（按位深 vs 固定 32768），24/32-bit 两处数值不同；应抽 utils 共用 |
-| 2   | utils.convert 弹性转换零使用                                   | analyzer.py:20 导入 to_float 未调用；to_int/to_optional_float 无调用方       | 弹性转换防线形同虚设                                                              |
-| 3   | utils.retry 整模块无调用                                       | radio/analyzer 均未用                                                        | 与"缓存兜底/重试"策略脱节                                                         |
-| 4   | config.settings 整模块无调用                                   | AppConfig/load/save_config 零引用                                            | 用户配置持久化未接线 UI                                                           |
-| 5   | 金属渐变绘制三处重复                                           | jog_wheel/fader_slider/rotary_knob（同色值系）                               | 应抽 ui/widgets/_skins.py 公共皮肤工具                                            |
-| 6   | 滚轮步进"全程/20"两处                                          | rotary_knob/fader_slider                                                     | 抽公共常量                                                                        |
-| 7   | 拍长计算两处                                                   | engine beat_jump vs set_beatloop                                             | 提取 _beat_len(bpm)                                                               |
-| 8   | 候选打分循环两处                                               | analyzer._estimate_bpm vs _pick_metrical_level                               | 提取 _score_candidate()                                                           |
-| 9   | Key Shift 钳制两处                                             | engine.py:456 vs transition_manager.py:124                                   | 统一进 config                                                                     |
-| 10  | 回调内插值结构重复                                             | engine 弯音 vs scratch（idx/i0/i1/frac 加权）                                | 抽公共插值方法                                                                    |
-| 11  | scan_folder 重复风险                                           | analyzer.py:530 已实现 vs library.py 占位同名                                | M1 实现时直接复用勿重写                                                           |
-| 12  | set_channel_fader 复制 deck.stop 逻辑                          | engine 锁内直改 7 个私有字段                                                 | Deck 提供原子 fader_stop/start()                                                  |
-| 13  | 表头配置未用                                                   | main_window 硬编码 ["Mix",…] vs ui.json table_headers ["状态",…]（值不一致） | 用配置驱动                                                                        |
-| 14  | file_utils.clear_cache 死代码 + read_json 对不存在文件也写缓存 | —                                                                            | 缓存永久陈旧风险                                                                  |
+1. 解码归一化重复：engine.load_audio vs analyzer._decode_mono（数值不一致，应抽 utils 共用）
+2. utils.convert 弹性转换零使用（analyzer 导入未调用）
+3. utils.retry / config.settings 整模块无调用
+4. 金属渐变绘制三处重复（jog_wheel/fader_slider/rotary_knob → 抽 _skins.py）
+5. 滚轮步进"全程/20"两处；6. 拍长计算两处（→ _beat_len）；7. 候选打分循环两处；8. Key Shift 钳制两处
+6. 回调内插值结构重复（弯音 vs scratch）；10. scan_folder 同名重复风险（library 占位）
+7. set_channel_fader 复制 deck.stop 逻辑；12. 表头硬编码 vs ui.json table_headers 不一致
+8. clear_cache 死代码 + read_json 对不存在文件写缓存
 
 ### 二、严重问题（功能/正确性/稳定性）
 
-1. themes.py 未接线：apply_theme() 全项目无调用，QSS 从未生效（自绘控件不受影响，原生控件/表格无样式）
-2. analyzer.py:501 engine_sr=44100 硬编码：base.json 采样率变更即 beats/downbeats 索引错位（正确性 bug）
-3. engine.py:818 除零：start_mix 不校验 fade_seconds>0 → _fill_mixing 除零整段静音
-4. engine.py:740 正向搜索形状错误：|search_rate|<1 时 out[:]=chunk[:frames] 形状不匹配（与已修弯音 bug 同源未修）
-5. stretcher.py 无 rubberband 前置检查：缺失时 TypeError 而非可读错误
-6. CuePlayer 二次失败外抛：与"故障静默 is_dead"承诺相悖
-7. rotary_knob.py:115-123 指针绘制可疑：QRectF 当"点"用 + 取 center，线段起点/长度异常，应直接 drawLine(cx,cy,…)
-8. panel_frame.py:37 set_title AttributeError：无标题构造后调用必崩
-9. pad 灯态冲突：pad 点击 isChecked 残留 + GlowButton 辉光判定混用交互态/业务灯态 → pad 灯阵失真
-10. main_window.py:535 直接写 deck._position：绕过锁与 API（Instant Doubles）
-11. deck_widget.py:95 44100 硬编码：M:SS 换算与 base.json 脱钩（说明区自认）
+1. themes 未接线（QSS 从未生效）；2. analyzer engine_sr=44100 硬编码（采样率变更索引错位）
+2. start_mix fade 除零；4. 正向搜索形状错误；5. stretcher 无 rubberband 前置检查
+3. CuePlayer 二次失败外抛；7. rotary 指针 QRectF 误用绘制错位
+4. panel set_title 无标题崩溃；9. pad 灯态 isChecked 残留冲突
+5. main_window 直写 deck._position（绕过锁）；11. deck_widget 44100 显示硬编码
 
-### 三、硬编码与配置化（AGENTS.md 参数约定违反）
+### 三、硬编码 / 防御性 / 死代码 / 规范违反（摘要）
 
-- modules 层：MAX_GAIN/VU_BUFFER/EQ 频率(100/1k/10k Hz)与增益斜率/Hot Cue 槽位 8×6 处/弯音±0.5/搜索±16/Key Shift±12/转场参数(16s/30s/0.1s)/分析参数群（MIN/MAX_BPM、能量权重、CUE 参数）
-- ui 层：#ff7a2f 等配色 20+ 处与 ui.json 同名键重复、定时器 100ms、splitter 比例、16777248（应 Qt.Key_Shift）、Instant Doubles 0.5s、状态栏 5000ms、Pitch 范围、Beat Loop/Jump 拍数表
-- 配置承诺未兑现：led_strip 读 ui.json 不存在的键（led_green_threshold/led_yellow_threshold）；jog_wheel SEARCH_WHEEL_STEP=4.0 未进配置；table_headers 键死配置
+- **硬编码**：modules 参数群（增益/EQ/槽位/钳制/转场/分析参数）未走 base.json；ui 配色 20+ 处与 ui.json 重复；定时器 100ms/splitter 比例/16777248/0.5s/5000ms 等；配置承诺未兑现（led 阈值键不存在、SEARCH_WHEEL_STEP 未进配置、table_headers 死配置）
+- **防御性缺口**：convert 不拦 nan/inf；waveform 无 1D 防护；fader/rotary min==max 除零；长文本溢出；static_config 无校验；EQ/FX setter 无锁；浮点精确比较
+- **死代码**：vu_meter 整模块、shift_state 死方法、_TRAVEL、QMessageBox 导入、_last_out_pos、_next_bpm/_next_downbeats、convert 两函数、retry/settings 整模块、clear_cache
+- **规范违反**：函数内延迟导入 8+ 处；Optional[] 6+ 处；说明区失实 5 处；参考标注 5 处
 
-### 四、防御性编程缺口
+### 四、亮点
 
-- convert.to_float 不拦截 "nan"/"inf"（污染分析数据）
-- waveform._build_peaks 无 1D 音频防护（IndexError）
-- fader_slider/rotary_knob 在 min==max 时除零
-- glow_button/mini_display 长文本溢出无省略
-- static_config 对 mapping 非 dict、键缺失无校验（与"抛错暴露"注释矛盾）
-- engine EQ/FX setter 无锁（系数错配一帧）；浮点精确比较（==1.0）脆弱
+回调 fail-soft 静音降级到位；预分配缓冲设计正确；进程池 spawn + numba 隔离；信号接线无类型失配；占位模块 M2/M3 边界清晰
 
-### 五、死代码
+### 五、建议优先级
 
-vu_meter.py 整模块（被 LedStrip 替代）、shift_state.toggle/active/changed（零调用零订阅）、fader_slider._TRAVEL、main_window QMessageBox 导入/_UI_COLORS/_on_search_release 占位接线、engine._last_out_pos（只写不读）、transition_manager._next_bpm/_next_downbeats（只写不读）、utils.convert 两函数、utils.retry 整模块、config.settings 整模块、file_utils.clear_cache
+| 优先级    | 事项                                                                                |
+| --------- | ----------------------------------------------------------------------------------- |
+| P0 正确性 | 采样率硬编码 / 搜索形状 / fade 除零 / 指针绘制 / pad 灯态 / set_title / themes 接线 |
+| P1 去重   | 解码统一（数值不一致）/ 金属渐变抽 _skins.py / 拍长·钳制·步进公共化 / 表头配置化    |
+| P2 配置化 | modules 参数群 + ui 配色进 config，兑现 led 阈值/搜索步进/表头承诺                  |
+| P3 清理   | 死代码归档或接线 / 说明区同步 / Optional→\|None / 延迟导入上移 / 参考标注移除       |
 
-### 六、规范违反
+---
 
-- 函数内延迟导入 8+ 处（main_window×5、engine import time、analyzer tempfile/get_project_root、deck_widget Path）——librosa 豁免条款不适用
-- Optional[...] 6+ 处未用 | None；tuple/list/dict 泛注解多处
-- 说明区失实 5 处：engine（缺类/常量/分配取舍注释）、jog_wheel（0.02/×256 全面过时）、analyzer（缺 6 函数）、stretcher、convert（声称 analyzer 复用失实）
-- 参考标注注释：jog_wheel/pad_widget/beat_fx/vu_meter/shift_state 第 2 行"参考：w.study.md…"——与"正式程序文件禁止参考标注"字面冲突
+## 附录 A002：全量代码审计报告（第二轮，2026-08-12）
 
-### 七、亮点（合规良好）
+> 范围：全部 33 个 .py + 3 个 JSON（三路并行：utils/config、modules、ui），与第一轮逐项比对区分"遗留/新增"
+> 方式：只读审计，未修改任何代码；audit-project skill 执行
+> 状态：✅ **P0-P3 已全部修复**（2026-08-13 H 系列完成，见 x.progress.md；probe_h0-h3 + 全量回归 13/13 PASS + GUI 实测确认；待提交 V0.24）
 
-回调 fail-soft 双 try/except 静音降级落实到位；预分配缓冲（_buf_a/_buf_b/VU 环形）设计正确；analyzer 进程池 spawn + numba 缓存隔离（Windows 安全）；信号接线全量核对无类型失配；占位模块 M2/M3 边界清晰；文件尾说明区体系基本完整
+### 一、高（正确性/崩溃/数据竞争）
 
-### 八、建议优先级
+| 文件:行号                              | 问题                                                                        | 性质              |
+| -------------------------------------- | --------------------------------------------------------------------------- | ----------------- |
+| analyzer.py:437                        | hop = 512 与配置 ANALYSIS_HOP 重复定义——配置变更时 CUE 检测静默脱钩         | 新增确认          |
+| engine.py:197-234                      | DeckEQ setter 无锁，_b/_a 非成对替换，回调可能读到系数中间态                | 上轮标注未修      |
+| waveform_widget.py:23                  | _build_peaks 无 1D 防护（IndexError），set_audio 在 try 外调用 → 加载链崩溃 | 上轮标注未修      |
+| main_window.py:537                     | other_deck._position = ... 直写私有字段且无锁（与回调线程竞争）             | 上轮标注未修      |
+| rotary_knob.py:74 / fader_slider.py:67 | min==max 除零（RotaryKnob(0,0) 构造即崩）                                   | 新增确认          |
+| static_config.py:24-31                 | mapping 非 dict/键缺失/data 非 dict 校验缺失                                | 上轮 P1 标注未修  |
+| deck_widget.py:100-101                 | 44100 显示换算硬编码——G0.1 采样率配置化后 UI 显示层脱钩                     | 新增（G0.1 遗漏） |
 
-| 优先级    | 事项                                                                                                                         |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| P0 正确性 | ① analyzer 采样率硬编码 ② 搜索分支形状错误 ③ fade 除零 ④ rotary 指针绘制 ⑤ pad 灯态冲突 ⑥ panel set_title 崩溃 ⑦ themes 接线 |
-| P1 去重   | ① 解码归一化统一（严重，数值不一致）② 金属渐变抽 _skins.py ③ 拍长/钳制/步进公共化 ④ 表头配置化                               |
-| P2 配置化 | modules 参数群 + ui 配色 20 处进 config，兑现 led 阈值/搜索步进/表头承诺                                                     |
-| P3 清理   | 死代码（vu_meter/settings/retry/convert 未用部分）→ 归档或接线；说明区同步；Optional→\|None；延迟导入上移；参考标注移除      |
+### 二、中（纪律/一致性/配置化未闭环）
+
+1. def 内 import / def 内 def：transition_manager.py:125 _work 嵌套 + :142 函数内 import（G3.5 遗漏）；engine.py:1123、analyzer.py:490/553/664 函数内 import（新增 2 + 遗留 2）；main_window.py:441 函数内 import（顶层 L28 死导入并存）；rotary_knob.py:114,127 import math×2
+2. stretcher：rubberband_available() 零调用；渲染入口无前置检查；双渲染函数样板重复
+3. engine：L13 死 import；Censor 分支缺 _mix_sample；L1147 float 精确比较；set_pregain 2.0 字面量；0.01 阈值×6；Trans/Echo/Delay/HPF 曲线硬编码
+4. main_window：deck._bpm or 120.0 私有直读（与 _on_beatloop 的 _deck_meta 路径不一致）；_beat_fx._onoff.isChecked() 跨控件私有访问；fade_seconds=16.0 字面量；16777248 魔法数字；range(8) 未引用 SLOT_COUNT
+5. 重复实现：拍数阶梯 [1,2,4,8,16,32] 双处定义；path→entry 查找×2；_KEY_SHIFT_MAX 双处读键
+6. themes.py QSS 硬编码 6 色 + 说明区"颜色零硬编码"矛盾
+7. logger.py：路径硬编码（Windows 非标准）、无轮转、控制台 handler 无 errors 兜底（特殊字符致日志崩溃）
+8. convert.py：to_float 零调用；不拦截 nan/inf
+
+### 三、低（规范/风格）
+
+- import 顺序违规 3 处；_detect_cues 类型注解错误（list[int] 实返 list[dict]）
+- glow_button _GLOW_WHITE 死变量：辉光文字纯白 vs glow_white(#e8ecf0) 不一致
+- _skins.py 后仍散落重复（jog_wheel metal_pen / rotary_knob top_highlight_pen）
+- 长文本溢出无 elide（glow_button/mini_display）；pad_colors 空列表除零；beat_fx 尺寸 44<48 冲突；Key Shift 灯阵 idx0/idx7 双灯同亮（需确认语义）
+- 说明区偏差 3 处（beat_fx 关联配置/ main_window jog_bend_reset_ms / deck_widget 44100 注释）
+- 死代码：settings.CONFIG_DIR、ui.json quota_warn_percent 死键、engine L13
+
+### 四、修复优先级建议
+
+| 优先级    | 内容                                                                                                                                            |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0 正确性 | analyzer hop 脱钩 / DeckEQ 无锁 / waveform 1D 防护 / main_window 无锁写 _position / min==max 除零 / deck_widget 44100 显示 / static_config 校验 |
+| P1 去重   | 拍数阶梯单源 / path→entry 提取 / _KEY_SHIFT_MAX 单源 / stretcher 渲染样板 / engine 死 import / 双 BPM 路径统一                                  |
+| P2 配置化 | analyzer 能量权重+CUE 参数 / engine 0.01×6+FX 曲线 / themes QSS token 化 / logger 路径+轮转 / convert nan/inf+接线                              |
+| P3 清理   | def 内 import 全清（5 文件）/ def 内 def 提升 / glow_white 修正 / skins 收敛 / 死代码 / 说明区同步 / import 顺序                                |
+
+> 亮点：G0-G3 修复全部生效；配置键 45 个与代码读取完全一致；transition.py 无问题

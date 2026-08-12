@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
@@ -15,7 +17,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget
 
 from config.static.static_config import get_static_config
-from ui.widgets._skins import metal_gradient
+from ui.widgets._skins import metal_gradient, top_highlight_pen
 
 # 静态配置解包（旋钮配色）
 _SC = get_static_config()
@@ -70,8 +72,9 @@ class RotaryKnob(QWidget):
         self.valueChanged.emit(v)
 
     def _angle(self) -> float:
-        # 指针角度：min=-135°（左下）→ max=+135°（右下）
-        ratio = (self._value - self._min) / (self._max - self._min)
+        # 指针角度：min=-135°（左下）→ max=+135°（右下）；H0.5 分母防 min==max 除零
+        span = max(self._max - self._min, 1e-9)
+        ratio = (self._value - self._min) / span
         return -_ANGLE_RANGE / 2.0 + _ANGLE_RANGE * ratio
 
     # --- 交互 ---
@@ -111,8 +114,6 @@ class RotaryKnob(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         s = self.width()
         cx, cy = s / 2.0, s / 2.0
-        import math
-
         ang = math.radians(self._angle())
         r = s * 0.32
         # G0.4：指针直接画"圆心→端点"（原实现用 QRectF 当点取 center 致线段错位）
@@ -124,8 +125,6 @@ class RotaryKnob(QWidget):
 
     def _render_cache(self) -> None:
         # 静态层：银色刻度环（15° 刻度线，顶部 30° 高亮）+ 金属外圈 + 旋帽
-        import math
-
         s = self.width()
         pm = QPixmap(s, s)
         pm.fill(Qt.transparent)
@@ -165,7 +164,7 @@ class RotaryKnob(QWidget):
         p.setBrush(cap_grad)
         p.setPen(QPen(QColor(0, 0, 0, 140), 1))
         p.drawEllipse(cap)
-        p.setPen(QPen(QColor(255, 255, 255, 60), 1))
+        p.setPen(top_highlight_pen(60))  # H3.3：公共皮肤高光
         p.drawArc(cap.adjusted(2, 2, -2, -2), 200 * 16, 140 * 16)
         p.end()
         self._pixmap = pm

@@ -17,6 +17,8 @@ from typing import Callable
 import numpy as np
 
 from config.static.static_config import get_static_config
+from utils.audio_decode import decode_audio
+from utils.file_utils import get_project_root
 
 # 静态配置解包（采样率/跳帧/缓存路径/BPM 区间，AGENTS.md 参数约定：零硬编码）
 _SC = get_static_config()
@@ -44,6 +46,16 @@ SUPPORTED_EXTENSIONS = {
 
 # BPM 合理区间（DJ 用）：估计值折半/加倍进此区间（cuekey tempo.py 约定，
 # G2.1 配置驱动：值见顶部 MIN_BPM/MAX_BPM）
+
+# 能量评分权重（H2.1：配置驱动，base.json energy_weights）
+ENERGY_WEIGHTS = [
+    float(w) for w in _SC.base.get("energy_weights", [0.4, 0.25, 0.2, 0.15])
+]
+
+# CUE 检测参数（H2.1：配置驱动，base.json cue_params）
+CUE_PARAMS = dict(
+    _SC.base.get("cue_params", {"max_cues": 8, "min_spacing": 8.0, "n_mfcc": 13})
+)
 
 # 缓存算法版本：检测算法变更时 +1，旧缓存自动失效重算
 ANALYSIS_VERSION = 1
@@ -412,7 +424,10 @@ def _detect_energy(y: np.ndarray, sr: int, bpm: float) -> int:
     tempo_score = float(np.clip((bpm - 70.0) / 80.0, 0.0, 1.0))
 
     score = (
-        0.40 * loud_score + 0.25 * onset_score + 0.20 * bass_score + 0.15 * tempo_score
+        ENERGY_WEIGHTS[0] * loud_score
+        + ENERGY_WEIGHTS[1] * onset_score
+        + ENERGY_WEIGHTS[2] * bass_score
+        + ENERGY_WEIGHTS[3] * tempo_score
     )
     return int(np.clip(round(1 + 9 * score), 1, 10))
 
@@ -424,19 +439,22 @@ def _detect_energy(y: np.ndarray, sr: int, bpm: float) -> int:
 
 def _detect_cues(
     y: np.ndarray, sr: int, bpm: float, beat_times: np.ndarray
-) -> list[int]:
+) -> list[dict]:
     # 自动 CUE：MFCC+chroma 聚合聚类分段 → 边界吸附最近拍点 → 8s 去重 → 最多 8 个
     import librosa
 
-    max_cues = 8
-    min_spacing = 8.0
+    max_cues = int(CUE_PARAMS["max_cues"])
+    min_spacing = float(CUE_PARAMS["min_spacing"])
+    n_mfcc = int(CUE_PARAMS["n_mfcc"])
     duration = len(y) / sr
     if duration < 8.0:
         return []
 
-    hop = 512
-    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13, hop_length=hop)
-    chroma = librosa.feature.chroma_stft(y=y, sr=sr, hop_length=hop, tuning=0.0)
+    # H0.1：hop 与配置常量统一（原局部 512 与 ANALYSIS_HOP 脱钩，配置变更 CUE 不跟随）
+    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc, hop_length=ANALYSIS_HOP)
+    chroma = librosa.feature.chroma_stft(
+        y=y, sr=sr, hop_length=ANALYSIS_HOP, tuning=0.0
+    )
     features = np.vstack([mfcc, chroma])
     features = librosa.util.normalize(features, axis=1)
 
@@ -485,10 +503,8 @@ def empty_record() -> dict:
 
 
 def _decode_mono(path: str, sr: int) -> np.ndarray:
-    # 解码音频为 sr Hz mono float32 一维（G1.1：复用 utils 统一解码；
-    # 失败抛异常由上层降级）
-    from utils.audio_decode import decode_audio
-
+    # 解码音频为 sr Hz mono float32 一维（G1.1 复用 utils 统一解码；
+    # H3.1：decode_audio 顶层导入；失败抛异常由上层降级）
     return decode_audio(path, 1, sr)[:, 0]
 
 
@@ -549,9 +565,8 @@ def scan_folder(root: str) -> list[str]:
 
 
 def _cache_dir() -> Path:
-    # 缓存目录：base.json cache_path（项目内 cache/，已 gitignore）
-    from utils.file_utils import get_project_root
-
+    # 缓存目录：base.json cache_path（项目内 cache/，已 gitignore；
+    # H3.1：get_project_root 顶层导入）
     cache_path = str(_SC.base.get("cache_path", "cache/analysis.sqlite"))
     return get_project_root() / Path(cache_path)
 
@@ -844,3 +859,4 @@ if __name__ == "__main__":
 # 异常处理：单曲失败 → 批处理回调 error 继续（不中断）；缓存失败 → 降级无缓存；
 #   解码失败 → 上层 empty_record 兜底（AGENTS.md 错误策略）
 # 关联配置：config/static/base.json（analysis_sample_rate/analysis_hop/cache_path）
+

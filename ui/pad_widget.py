@@ -12,9 +12,10 @@ from ui.widgets.glow_button import GlowButton
 # 静态配置解包（Pad 五模式色）
 _SC = get_static_config()
 _UI = _SC.ui
+# H3.5：空列表兜底（防取模除零）
 _PAD_COLORS = _UI.get(
     "pad_colors", ["#ff7a2f", "#00cccc", "#2fe37a", "#ff4444", "#ffcc00"]
-)
+) or ["#ff7a2f"]
 
 # 可软件实现的 Pad 模式（FLX4 模式键：HOT CUE / PAD FX1 / PAD FX2 / BEAT JUMP /
 # SAMPLER / KEYBOARD / BEAT LOOP / KEY SHIFT；此处取核心 5 种）

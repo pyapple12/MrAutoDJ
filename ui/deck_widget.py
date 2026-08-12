@@ -18,10 +18,11 @@ from PySide6.QtWidgets import (
 from ui.waveform_widget import WaveformWidget
 from ui.widgets.glow_button import GlowButton
 
-# 静态配置解包（配色 token，G2.2）
+# 静态配置解包（配色 token + 采样率换算基准，H0.6）
 from config.static.static_config import get_static_config
 
 _UI = get_static_config().ui
+_SR = int(get_static_config().base.get("sample_rate", 44100))
 
 
 class DeckWidget(QWidget):
@@ -95,10 +96,10 @@ class DeckWidget(QWidget):
         self.waveform.set_audio(audio)
 
     def update_progress(self, position: int, duration: int) -> None:
-        # 刷新进度文本与波形播放头（100ms 定时器）
+        # 刷新进度文本与波形播放头（100ms 定时器；H0.6：采样率配置驱动）
         self.waveform.set_position(position)
-        cur = f"{position // 44100 // 60}:{position // 44100 % 60:02d}"
-        tot = f"{duration // 44100 // 60}:{duration // 44100 % 60:02d}"
+        cur = f"{position // _SR // 60}:{position // _SR % 60:02d}"
+        tot = f"{duration // _SR // 60}:{duration // _SR % 60:02d}"
         self._progress_label.setText(f"{cur} / {tot}")
 
     def set_playing_state(self, is_playing: bool) -> None:
@@ -120,8 +121,8 @@ class DeckWidget(QWidget):
 #   keylock_toggled(bool) / pitch_changed(float)：UI 只发指令（引擎由 MainWindow 连接）
 # 方法：
 #   set_track(path, bpm, key, audio)：信息 + 波形更新
-#   update_progress(position, duration)：进度文本 + 播放头（44100 采样率硬编码换算，
-#     引擎约定固定 44100；M:SS 显示）
+#   update_progress(position, duration)：进度文本 + 播放头（H0.6 起采样率
+#     由 _SR = base.json sample_rate 换算，M:SS 显示）
 #   set_playing_state(is_playing)：按钮文案切换
 # 设计理由：控件零引擎依赖（信号解耦，B1"UI 只发指令"）；Pitch 用整数百分比滑块
 # 关联配置：无（颜色在 waveform 内部）

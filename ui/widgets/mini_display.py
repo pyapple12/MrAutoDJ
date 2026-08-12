@@ -48,15 +48,17 @@ class MiniDisplay(QWidget):
         path.addRoundedRect(rect, _RADIUS, _RADIUS)
         p.fillPath(path, _SCREEN_BG)
         if self._text:
+            # H3.5：超宽文本省略号（防溢出屏体）
+            elided = p.fontMetrics().elidedText(self._text, Qt.ElideRight, int(w - 8))
             # 辉光层：半透明粗描边
             p.setPen(QColor(_GREEN.red(), _GREEN.green(), _GREEN.blue(), 90))
             font_bold = QFont(self.font())
             font_bold.setPointSizeF(max(8.0, h * 0.55))
             p.setFont(font_bold)
-            p.drawText(rect.adjusted(1, 0, -1, 0), Qt.AlignCenter, self._text)
+            p.drawText(rect.adjusted(1, 0, -1, 0), Qt.AlignCenter, elided)
             # 正文层：实色
             p.setPen(_GREEN)
-            p.drawText(rect.adjusted(1, 0, -1, 0), Qt.AlignCenter, self._text)
+            p.drawText(rect.adjusted(1, 0, -1, 0), Qt.AlignCenter, elided)
         p.end()
 
 

@@ -19,6 +19,9 @@ _UI = get_static_config().ui
 # 效果库（E1.8 引擎实现 + 既有）
 FX_TYPES = ["HPF", "LPF", "Trans", "Echo", "Delay"]
 
+# 拍数阶梯（H1.1：单源，main_window 的 Beat Loop Pad 引用此常量）
+BEAT_LADDER = [1, 2, 4, 8, 16, 32]
+
 
 class BeatFxWidget(QWidget):
     # Beat FX 面板：选择/通道/拍数/深度/开关（全部原语控件）
@@ -59,7 +62,7 @@ class BeatFxWidget(QWidget):
 
         # 拍数：MiniDisplay + ±按钮
         self._beats_disp = MiniDisplay()
-        self._beats_disp.setFixedSize(44, 20)
+        self._beats_disp.setFixedSize(48, 20)  # H3.5：与 MiniDisplay 最小尺寸对齐
         self._beats_minus = GlowButton("-")
         self._beats_plus = GlowButton("+")
         self._beats_minus.clicked.connect(self._beats_delta)
@@ -127,11 +130,10 @@ class BeatFxWidget(QWidget):
         self.channel_changed.emit(ch)
 
     def _beats_delta(self) -> None:
-        # 拍数 ±（1-32，循环 1/2/4/8/16/32 阶梯）
-        ladder = [1, 2, 4, 8, 16, 32]
-        idx = ladder.index(self._beats) if self._beats in ladder else 0
+        # 拍数 ±（1-32，循环 BEAT_LADDER 阶梯）
+        idx = BEAT_LADDER.index(self._beats) if self._beats in BEAT_LADDER else 0
         idx = (idx + 1) if self.sender() is self._beats_plus else (idx - 1)
-        self.set_beats(ladder[idx % len(ladder)])
+        self.set_beats(BEAT_LADDER[idx % len(BEAT_LADDER)])
         self.beats_changed.emit(self._beats)
 
     def set_beats(self, beats: int) -> None:
@@ -155,4 +157,4 @@ class BeatFxWidget(QWidget):
 #   set_beats(beats)：外部同步（BPM Auto；小屏显示）
 # 设计理由：B13-5 六部件（通道/选择/拍数±/深度/开关 + BPM Auto-Tap 为 SHIFT 语义独立化）；
 #   F6.4 全原语化（GlowButton/MiniDisplay/RotaryKnob，对齐 FLX4 Effects 区视觉）
-# 关联配置：无
+# 关联配置：config/static/ui.json（glow_orange 效果键灯色，H3.5 补全）

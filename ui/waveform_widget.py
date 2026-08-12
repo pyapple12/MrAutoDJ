@@ -20,7 +20,9 @@ def _build_peaks(audio: np.ndarray, width: int) -> np.ndarray:
     if audio is None or len(audio) == 0 or width <= 0:
         return np.zeros((max(1, width), 2), dtype=np.float32)
     n = len(audio)
-    mono = np.mean(audio, axis=1).astype(np.float64)
+    # H0.3：1D mono 输入防护（原 np.mean(axis=1) 对 1D 抛 AxisError）
+    mono = audio if audio.ndim == 1 else np.mean(audio, axis=1)
+    mono = np.asarray(mono, dtype=np.float64)
     if n <= width:
         # 短音频：直接重采样到目标宽度
         idx = np.linspace(0, n - 1, width).astype(int)

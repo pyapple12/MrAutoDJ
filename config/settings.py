@@ -10,7 +10,6 @@ from utils.file_utils import get_project_root, read_json, write_json
 
 # 静态配置解包（AGENTS.md：参数外置 base.json，用户配置路径由 json 指定）
 _SC = get_static_config()
-CONFIG_DIR = get_project_root() / "config"
 CONFIG_FILE = get_project_root() / Path(str(_SC.base["user_config_path"]))
 DEFAULT_THEME = str(_SC.base["default_theme"])
 
@@ -57,7 +56,7 @@ def save_config(config: AppConfig) -> None:
 
 # ===== config/settings.py 模块说明 =====
 # 模块级常量：
-#   CONFIG_DIR / CONFIG_FILE：用户配置路径（项目内 config/user_config.json，
+#   CONFIG_FILE：用户配置路径（项目内 config/user_config.json，
 #     get_project_root() 拼接，路径由 base.json user_config_path 指定）
 #   DEFAULT_THEME：默认主题从静态配置现取（零硬编码）
 # 类型：
@@ -71,3 +70,4 @@ def save_config(config: AppConfig) -> None:
 #   （AGENTS.md 错误策略：宽容解析）
 # 异常处理：读写异常全部由 file_utils 宽容消化
 # 关联配置：config/static/base.json（user_config_path/default_theme）
+

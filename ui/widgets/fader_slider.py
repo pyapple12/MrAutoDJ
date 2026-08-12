@@ -63,8 +63,9 @@ class FaderSlider(QWidget):
     # --- 几何换算 ---
 
     def _ratio(self) -> float:
-        # 值 → 0..1 行程比例
-        return (self._value - self._min) / (self._max - self._min)
+        # 值 → 0..1 行程比例（H0.5 分母防 min==max 除零）
+        span = max(self._max - self._min, 1e-9)
+        return (self._value - self._min) / span
 
     def _set_from_pos(self, pos) -> None:
         # 位置 → 值（垂直：y 从底部起算；水平：x 从左起算）
@@ -167,4 +168,3 @@ class FaderSlider(QWidget):
 # 设计理由：推子"直跳"语义（DJ 台推子点哪到哪，区别于平滑滑杆）；
 #   金属帽渐变模拟拉丝质感（M1.6 规格单）
 # 关联配置：config/static/ui.json（panel_inset/panel_edge/silk_text）
-

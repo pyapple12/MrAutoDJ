@@ -7,7 +7,7 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QCheckBox, QLabel, QVBoxLayout, QWidget
 
 from config.static.static_config import get_static_config
-from ui.widgets._skins import metal_gradient
+from ui.widgets._skins import metal_gradient, metal_pen
 
 # 静态配置解包（转盘颜色 + 弯音/搜索/搓碟灵敏度，参数一律走 ui.json）
 _SC = get_static_config()
@@ -145,7 +145,7 @@ class JogWheel(QWidget):
         # 外圈金属渐变环（G1.2：公共皮肤渐变）
         painter.fillRect(self.rect(), bg)
         painter.setBrush(metal_gradient(0, 0, w, h))
-        painter.setPen(QPen(QColor(60, 64, 70), 2))
+        painter.setPen(metal_pen(2))  # H3.3：公共皮肤描边
         painter.drawEllipse(center, r_out, r_out)  # 金属外圈
         # 顶面（搓碟区）：深灰内盘 + 细分圆（G2.2：配色 token）
         painter.setBrush(_PANEL_INSET)

@@ -10,7 +10,7 @@ import numpy as np
 import sounddevice as sd
 
 from config.static.static_config import get_static_config
-from modules.transition import plan_transition, tempo_compatible
+from utils.audio_decode import decode_audio
 
 # 静态配置解包（AGENTS.md 参数约定：采样率/块大小/通道数零硬编码）
 _SC = get_static_config()
@@ -41,8 +41,18 @@ DELAY_PRESET = dict(
     _SC.base.get("fx_delay", {"delay": 0.375, "feedback": 0.4, "taps": 3})
 )
 
-# Key Shift 半音上限（±key_shift_max，G1.3：transition_manager 共用，配置驱动）
-_KEY_SHIFT_MAX = int(_SC.base.get("key_shift_max", 12))
+# FX 参数群（H2.2：配置驱动 base.json）
+KNOB_DEADZONE = float(
+    _SC.base.get("knob_deadzone", 0.01)
+)  # EQ 死区/FX 最小深度/Fader Start
+FX_TRANS_LADDER = [int(v) for v in _SC.base.get("fx_trans_ladder", [0, 4, 8, 16, 32])]
+FX_HPF_RANGE = [float(v) for v in _SC.base.get("fx_hpf_range", [300.0, 4000.0])]
+FX_LPF_RANGE = [float(v) for v in _SC.base.get("fx_lpf_range", [10000.0, 250.0])]
+FX_ECHO_DEPTH = [float(v) for v in _SC.base.get("fx_echo_depth", [0.3, 0.4])]
+FX_DELAY_DEPTH = [float(v) for v in _SC.base.get("fx_delay_depth", [0.2, 0.3])]
+
+# Key Shift 半音上限（H1.3：公开常量，transition_manager 引用，单处读键）
+KEY_SHIFT_MAX = int(_SC.base.get("key_shift_max", 12))
 
 
 class State(Enum):
@@ -72,8 +82,8 @@ class Biquad:
             self._b, self._a = None, None
             return
         a0 = a[0]
-        self._b = b / a0
-        self._a = a / a0
+        # H0.2：单条元组赋值保证 _b/_a 原子替换（原两行赋值回调可能读到新旧混配）
+        self._b, self._a = b / a0, a / a0
         self._zi = np.zeros((2, 2), dtype=np.float64)
 
     def low_shelf(self, gain_db: float, freq: float, q: float = 0.707) -> None:
@@ -202,7 +212,7 @@ class DeckEQ:
             if self.low_amt >= 0
             else EQ_GAIN_DB[1] * abs(self.low_amt)
         )
-        if abs(self.low_amt) < 0.01:
+        if abs(self.low_amt) < KNOB_DEADZONE:
             self.low._set_coeffs(None, None)
         else:
             self.low.low_shelf(gain, EQ_FREQS[0])
@@ -215,7 +225,7 @@ class DeckEQ:
             if self.mid_amt >= 0
             else EQ_GAIN_DB[1] * abs(self.mid_amt)
         )
-        if abs(self.mid_amt) < 0.01:
+        if abs(self.mid_amt) < KNOB_DEADZONE:
             self.mid._set_coeffs(None, None)
         else:
             self.mid.peaking(gain, EQ_FREQS[1])
@@ -228,7 +238,7 @@ class DeckEQ:
             if self.high_amt >= 0
             else EQ_GAIN_DB[1] * abs(self.high_amt)
         )
-        if abs(self.high_amt) < 0.01:
+        if abs(self.high_amt) < KNOB_DEADZONE:
             self.high._set_coeffs(None, None)
         else:
             self.high.high_shelf(gain, EQ_FREQS[2])
@@ -424,6 +434,14 @@ class Deck:
         with self._lock:
             self._cue_sample = max(0, int(seconds * self.sr))
 
+    def set_position_samples(self, samples: int) -> None:
+        # 公开 seek（H0.4）：持锁设置播放位置并钳制曲内（Instant Doubles 等用，
+        # 取代外部直写 _position 私有字段）
+        with self._lock:
+            if self._now_audio is None:
+                return
+            self._position = max(0, min(int(samples), len(self._now_audio)))
+
     def cue_play(self) -> None:
         # 从 CUE 点播放（无音频则忽略）
         with self._lock:
@@ -501,7 +519,7 @@ class Deck:
     def set_key_shift(self, semitones: int) -> None:
         # 设置 Key Shift（钳制 ±key_shift_max；仅存状态，实际变调渲染由预渲染管线执行）
         with self._lock:
-            self._key_shift = max(-_KEY_SHIFT_MAX, min(_KEY_SHIFT_MAX, int(semitones)))
+            self._key_shift = max(-KEY_SHIFT_MAX, min(KEY_SHIFT_MAX, int(semitones)))
 
     @property
     def key_shift(self) -> int:
@@ -962,29 +980,33 @@ class Deck:
         with self._lock:
             self._fx_effect = effect
             self._fx_depth = max(0.0, min(1.0, float(depth)))
-            if effect == "HPF" and depth > 0.01:
-                # 截止随 depth 对数升高（300Hz → 4000Hz）
-                cutoff = 300.0 * (4000.0 / 300.0) ** depth
+            if effect == "HPF" and depth > KNOB_DEADZONE:
+                # 截止随 depth 对数升高（H2.2：范围配置驱动）
+                lo, hi = FX_HPF_RANGE
+                cutoff = lo * (hi / lo) ** depth
                 self._fx_filter = Biquad(self.sr)
                 self._fx_filter.highpass(cutoff)
-            elif effect == "LPF" and depth > 0.01:
-                cutoff = 10000.0 * (250.0 / 10000.0) ** depth
+            elif effect == "LPF" and depth > KNOB_DEADZONE:
+                lo, hi = FX_LPF_RANGE
+                cutoff = lo * (hi / lo) ** depth
                 self._fx_filter = Biquad(self.sr)
                 self._fx_filter.lowpass(cutoff)
             else:
                 self._fx_filter = Biquad(self.sr)
             if effect == "Echo":
-                self._fx_delay.configure(ECHO_PRESET["delay"], 0.3 + 0.4 * depth)
+                base, slope = FX_ECHO_DEPTH
+                self._fx_delay.configure(ECHO_PRESET["delay"], base + slope * depth)
             elif effect == "Delay":
+                base, slope = FX_DELAY_DEPTH
                 self._fx_delay.configure(
                     DELAY_PRESET["delay"],
-                    0.2 + 0.3 * depth,
+                    base + slope * depth,
                     n_taps=int(DELAY_PRESET.get("taps", 3)),
                 )
 
     def _apply_fx(self, out: np.ndarray) -> None:
         # Beat FX 执行（回调内；depth=0 旁通）
-        if self._fx_depth <= 0.01 or not self._fx_effect:
+        if self._fx_depth <= KNOB_DEADZONE or not self._fx_effect:
             return
         effect = self._fx_effect
         if effect in ("HPF", "LPF"):
@@ -993,7 +1015,7 @@ class Deck:
             self._fx_delay.process(out, len(out))
         elif effect == "Trans" and self._bpm > 0:
             # 节拍门控：50% 占空比，随 depth 变密（1/4 → 1/32 阶梯）
-            div = [0, 4, 8, 16, 32][min(4, int(self._fx_depth * 5))]
+            div = FX_TRANS_LADDER[min(4, int(self._fx_depth * 5))]
             if div > 0:
                 beat = self.sr * 60.0 / self._bpm
                 period = max(2.0, beat * 4.0 / div)
@@ -1084,7 +1106,7 @@ class AudioEngine:
             self._ch_fader[deck_index] = max(0.0, min(1.0, float(value)))
             if self._fader_start:
                 deck = self.deck_a if deck_index == 0 else self.deck_b
-                if self._ch_fader[deck_index] > 0.01:
+                if self._ch_fader[deck_index] > KNOB_DEADZONE:
                     deck._paused = False
                     if deck.state == State.IDLE and deck._now_audio is not None:
                         deck.state = State.PLAYING
@@ -1119,9 +1141,8 @@ class AudioEngine:
     # --- 解码（D2.2） ---
 
     def load_audio(self, path: str) -> np.ndarray:
-        # 解码任意 ffmpeg 支持格式为 (N,2) float32 @44100（G1.1：复用 utils 统一解码）
-        from utils.audio_decode import decode_audio
-
+        # 解码任意 ffmpeg 支持格式为 (N,2) float32 @44100
+        # （G1.1 复用 utils 统一解码；H3.1：decode_audio 顶层导入）
         return decode_audio(path, CHANNELS, SAMPLE_RATE)
 
     # --- 关闭 ---
@@ -1316,7 +1337,7 @@ class CuePlayer:
 #   SLOT_COUNT=8（slot_count）：Hot Cue/Sampler 槽位上限
 #   JOG_BEND_MAX=0.5 / JOG_SEARCH_MAX=16（jog_bend_max/jog_search_max）：钳制
 #   ECHO_PRESET / DELAY_PRESET（fx_echo/fx_delay）：效果预置
-#   _KEY_SHIFT_MAX=12（key_shift_max）：Key Shift 钳制（transition_manager 共用）
+#   KEY_SHIFT_MAX=12（key_shift_max）：Key Shift 钳制（transition_manager 共用）
 # 类型：
 #   State(Enum)：IDLE/PLAYING/MIXING（B1 状态机）
 #   Biquad：RBJ 双二阶（低架/高架/峰形；系数 setter 算、回调只跑差分；zi 持久）

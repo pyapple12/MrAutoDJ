@@ -178,7 +178,7 @@
 
 - [x] G0.1 analyzer 采样率硬编码 —— `analyzer.py` `engine_sr = 44100` → `int(_SC.base.get("sample_rate", 44100))`；验证：probe_g0 断言配置驱动 + beats 索引在曲内范围
 - [x] G0.2 搜索分支形状错误 —— 抽 `Deck._fill_resample()` 公共方法（step 样本线性插值到 frames，step==frames 直通），弯音与正向搜索共用；验证：`jog_search(0.5)` fill 不崩、推进正确、输出非静音
-- [x] G0.3 fade 除零 —— `start_mix` 内 `_fade_samples = max(1, int(fade_seconds*sr))`；验证：`start_mix(fade=0)` 不崩、_fade_samples≥1、转场输出非静音
+- [x] G0.3 fade 除零 —— `start_mix` 内 `_fade_samples = max(1, int(fade_seconds*sr))`；验证：`start_mix(fade=0)` 不崩、\_fade_samples≥1、转场输出非静音
 - [x] G0.4 rotary 指针绘制 —— 原 QRectF 当"点"取 center 致线段错位 → 直接 `drawLine(圆心, 端点)`（QPointF）；验证：绘制不崩 + 端点几何断言；截图待多模态核对
 - [x] G0.5 pad 灯态冲突 —— 8 键去掉 `setCheckable(True)`（点按辉光由 isDown 驱动、业务灯态由 set_led 驱动，防 isChecked 残留灯阵失真）；验证：点击发一次信号 + 无 checked 残留 + set_led 控制灯态
 - [x] G0.6 panel set_title 崩溃 —— 无标题构造时惰性创建 `_label`（hasattr 检查）；验证：`PanelFrame().set_title("X")` 不崩 + 标签存在
@@ -188,21 +188,21 @@
 
 - [x] G1.1 解码归一化统一 —— 新建 `utils/audio_decode.py`（`decode_audio(path, channels, frame_rate)`：pydub 解码 + 按位深归一化）；`engine.load_audio` 与 `analyzer._decode_mono` 引用（mono 取 `[:,0]`）；验证：probe_g1 16/24-bit 峰值≈0.8 且两处一致 + 源码断言去重
 - [x] G1.2 金属渐变抽公共皮肤 —— 新建 `ui/widgets/_skins.py`（`metal_gradient()/metal_pen()/top_highlight_pen()`），jog_wheel/fader_slider/rotary_knob 三处引用替换各自渐变（色值统一 208,212,218→150,154,160→112,116,122）；验证：probe_g1 渲染不崩 + 截图待多模态核对
-- [x] G1.3 拍长/钳制/步进公共化 —— ① `Deck._beat_len(bpm)` 提取（beat_jump/set_beatloop 共用）；② `key_shift_max: 12` 进 base.json，engine/transition_manager 双处引用（_KEY_SHIFT_MAX）；③ `wheel_step_divisions: 20` 进 ui.json，rotary_knob/fader_slider 滚轮步进引用；验证：probe_g1 行为等价 + 源码断言
+- [x] G1.3 拍长/钳制/步进公共化 —— ① `Deck._beat_len(bpm)` 提取（beat_jump/set_beatloop 共用）；② `key_shift_max: 12` 进 base.json，engine/transition_manager 双处引用（\_KEY_SHIFT_MAX）；③ `wheel_step_divisions: 20` 进 ui.json，rotary_knob/fader_slider 滚轮步进引用；验证：probe_g1 行为等价 + 源码断言
 - [x] G1.4 表头配置化 —— `main_window` 用 `_SC.ui.get("table_headers")` 驱动表头与列数（原硬编码 ["Mix",…] vs 配置 ["状态",…] 不一致问题解决）；验证：probe_g1 表头文本/列数与配置一致
 
 ### G2. P2 配置化（3 组）
 
 - [x] G2.1 modules 参数进 base.json —— ① engine：max_gain/vu_buffer/eq_freqs[100,1k,10k]/eq_gain_db[6,-30]/slot_count/jog_bend_max=0.5/jog_search_max=16/fx_echo+fx_delay 预置（Echo/Delay 类与 Beat FX 联动引用）；② transition_manager：mix_trigger_margin_seconds/default_fade_seconds/default_restore_seconds；③ transition.py：max_drift_beats/tempo_match_tolerance；④ analyzer：min_bpm/max_bpm（能量权重与 CUE 参数组暂留代码内，后续迭代）；验证：probe_g2 16 项配置驱动断言 + 行为等价（越界槽位忽略等）
-- [x] G2.2 ui 配色去硬编码 —— main_window（_UI_COLORS 死变量改 _UI + LOAD/Mix 橙）×3、deck_widget（播放 LED 橙）、beat_fx（效果键橙）、jog_wheel（#ff7a2f/#e8ecf0/#8a9099/#1a1a1a → token）共 8 处；验证：probe_g2 源码断言无残留字面量色值
+- [x] G2.2 ui 配色去硬编码 —— main_window（\_UI_COLORS 死变量改 \_UI + LOAD/Mix 橙）×3、deck_widget（播放 LED 橙）、beat_fx（效果键橙）、jog_wheel（#ff7a2f/#e8ecf0/#8a9099/#1a1a1a → token）共 8 处；验证：probe_g2 源码断言无残留字面量色值
 - [x] G2.3 兑现配置承诺 —— ui.json 补 `led_green_threshold: 0.6`/`led_yellow_threshold: 0.85`（led_strip 原读不存在的键）/`jog_search_step: 4.0`（SEARCH_WHEEL_STEP 改读配置）；table_headers 已随 G1.4 启用；验证：probe_g2 键存在 + 控件读取值一致
 
 ### G3. P3 清理（5 组）
 
 - [x] G3.1 死代码清理 —— ① `ui/vu_meter.py` → archived/（被 LedStrip 替代，零引用）；② shift_state：删零调用 `toggle()`/`active`，`changed` 信号接线到 SHIFT 按钮 LED（glow_blue）；③ fader_slider `_TRAVEL`；④ main_window：QMessageBox 导入/`_on_search_release` 占位接线/`_UI_COLORS` 说明区引用；⑤ engine `_last_out_pos`（只写不读）；⑥ transition_manager `_next_bpm/_next_downbeats`（只写不读）；⑦ convert `to_int/to_optional_float` + analyzer `to_float` 死导入；验证：probe_g3 源码断言 + grep 确认
 - [x] G3.2 死模块标注 —— ① utils.retry 标注"规划中（M3 网络接入启用）"；② config.settings 标注"规划中（UI 窗口几何/主题持久化接入）"；③ file_utils.clear_cache 标注"保留供热重载/测试"；验证：probe_g3 关键字断言
-- [x] G3.3 说明区同步 —— engine（补常量组/FeedbackDelay 类/分配取舍说明/D2 更新）、jog_wheel（0.02/×256 过时 → 0.05/动态增益/配置键）、analyzer（补 7 函数）、stretcher（补 _smootherstep_integral）、convert（"analyzer 复用"失实修正）；验证：probe_g3 关键字覆盖
-- [x] G3.4 类型注解统一 —— engine Optional×6/tm Optional×4 → `| None`（typing import 清理）；get_gains→`tuple[float,float]`、vu_levels→`list[float]`、_sample_playing→`tuple[int,int]|None`、_tap_times→`list[float]`、fold_ratio→`tuple[float,str]`、_detect_cues→`list[int]`、scan_folder→`list[str]`、analyze_many paths→`list[str]`；验证：probe_g3 源码断言 + import 不崩
+- [x] G3.3 说明区同步 —— engine（补常量组/FeedbackDelay 类/分配取舍说明/D2 更新）、jog_wheel（0.02/×256 过时 → 0.05/动态增益/配置键）、analyzer（补 7 函数）、stretcher（补 \_smootherstep_integral）、convert（"analyzer 复用"失实修正）；验证：probe_g3 关键字覆盖
+- [x] G3.4 类型注解统一 —— engine Optional×6/tm Optional×4 → `| None`（typing import 清理）；get_gains→`tuple[float,float]`、vu_levels→`list[float]`、\_sample_playing→`tuple[int,int]|None`、\_tap_times→`list[float]`、fold_ratio→`tuple[float,str]`、\_detect_cues→`list[int]`、scan_folder→`list[str]`、analyze_many paths→`list[str]`；验证：probe_g3 源码断言 + import 不崩
 - [x] G3.5 延迟导入上移 + 参考标注移除 —— ① main_window：DeckWidget/JogWheel/PadWidget/BeatFxWidget 顶层导入 + `import time as _time` 顶层；② engine `import time` 顶层；③ deck_widget `Path` 顶层；④ 移除 jog_wheel/pad_widget/beat_fx/shift_state 第 2 行"参考：w.study.md…"标注（AGENTS.md 禁令）；验证：probe_g3 源码断言
 - [x] G3.6 检验 —— probe_g3 全 PASS + 全量回归（g0/g1/g2/p1/p2/p3/p5/p6 全绿）+ 冒烟 + 截图（纯代码清理无读图需求）
 
@@ -211,4 +211,48 @@
 - [x] G4.1 全量回归 —— probe_p1/p2/p3/p5/p6/g0/g1/g2/g3 **9/9 PASS** + 冒烟 OK + layout_audit.png（1650×800）；多模态读图核对 G0-G3 无视觉回退
 - [x] G4.2 GUI 实测（2026-08-12 用户确认）—— 交互/灯态/听感 + G0 修复项复核均正常；后续将进行多轮审计迭代
 - [x] G4.3 文档同步 —— z.plan.md 审计附录标注已修项、README 移除 vu_meter 条目、x.progress.md G 系列勾选
-- [ ] G4.4 提交（由用户执行，Git 拆分用户决定）
+- [x] G4.4 提交（由用户执行，Git 拆分用户决定）
+
+## H. 第二轮审计修复任务清单（依据 z.plan.md 附录 A002：全量代码审计报告（第二轮，2026-08-12））
+
+> 规划：2026-08-12 生成。按 P0→P1→P2→P3 顺序执行；每项修复后跑对应检验（复用 probe_g0-g3 模式 + 新增用例）确认通过才算完成；多模态节点：涉及截图核对时停下通知切换。
+> 做法说明：`—— 做法` 为执行要点（含简单修复方案）。
+
+### H0. P0 正确性修复（7 项）
+
+- [x] H0.1 analyzer hop 脱钩（2026-08-12）—— `hop = 512` 删除，mfcc/chroma 直接用 `ANALYSIS_HOP`（配置变更 CUE 检测跟随）；验证：probe_h0 源码断言 PASS
+- [x] H0.2 DeckEQ setter 无锁（2026-08-12）—— `_set_coeffs` 改单条元组赋值 `self._b, self._a = b / a0, a / a0`（原子替换，回调不会读到新旧混配）；验证：probe_h0 断言 + 系数行为回归
+- [x] H0.3 waveform 1D 防护（2026-08-12）—— `mono = audio if audio.ndim == 1 else np.mean(audio, axis=1)`（1D 不再 AxisError）；验证：probe_h0 1D set_audio/grab 不崩
+- [x] H0.4 main_window 无锁写 \_position（2026-08-12）—— Deck 新增公开 `set_position_samples(samples)`（持锁 + clamp），main_window Instant Doubles 改用之；验证：probe_h0 设置/clamp 断言 + 源码断言无直写
+- [x] H0.5 min==max 除零（2026-08-12）—— rotary `_angle()`/fader `_ratio()` 分母 `max(span, 1e-9)`；验证：`RotaryKnob(0,0)`/`FaderSlider(0,0)` 构造+grab 不崩
+- [x] H0.6 deck_widget 采样率配置化（2026-08-12）—— 进度换算改 `_SR = _SC.base["sample_rate"]`（44100 字面量删除）；验证：probe_h0 源码断言
+- [x] H0.7 static_config 校验（2026-08-12）—— mapping/data `isinstance(dict)` 校验 + 缺 base/ui 键抛 RuntimeError（原静默降级掩盖错误）；验证：probe_h0 源码断言
+
+### H1. P1 去重（4 项）
+
+- [x] H1.1 拍数阶梯单源（2026-08-13）—— beat_fx_widget 导出 `BEAT_LADDER = [1,2,4,8,16,32]`（\_beats_delta 引用），main_window Beat Loop Pad 引用（原双处字面量消除）；验证：probe_h1 源码断言
+- [x] H1.2 path→entry 提取（2026-08-13）—— main_window 新增 `_entry_by_path(path)`（双击加载/Instant Doubles 共用），重复查找消除；验证：probe_h1 命中/未命中行为断言
+- [x] H1.3 KEY_SHIFT_MAX 单源（2026-08-13）—— engine 改公开 `KEY_SHIFT_MAX`（原 \_KEY_SHIFT_MAX），transition_manager import 引用（原双处读键消除）；验证：probe_h1 源码 + 值一致断言
+- [x] H1.4 stretcher 渲染样板 + engine 死 import（2026-08-13）—— 抽 `_render_via_cli(audio, sr, args_fn, prefix, cb)` 公共管道（tmpdir/sf.write/finally 清理收敛，shutil.rmtree 简化）；make_transition_buffer（--centre-focus + timemap）/make_keylock_buffer（--pitch）改为 args_fn 调用，行为等价；engine.py:13 死 import（plan_transition/tempo_compatible 无调用点）删除；验证：probe_h1 源码断言 + 全量回归（probe_g1/g3 断言同步新状态）
+
+### H2. P2 配置化（4 项）
+
+- [x] H2.1 analyzer 能量权重+CUE 参数（2026-08-13）—— `energy_weights`/`cue_params` 进 base.json；`ENERGY_WEIGHTS`/`CUE_PARAMS` 模块常量读取，\_detect_energy 权重与 \_detect_cues（max_cues/min_spacing/n_mfcc）引用；验证：probe_h2 配置断言 + 无字面量
+- [x] H2.2 engine FX 参数群（2026-08-13）—— `knob_deadzone`/`fx_trans_ladder`/`fx_hpf_range`/`fx_lpf_range`/`fx_echo_depth`/`fx_delay_depth` 进 base.json；EQ 死区×3/FX 深度×2/Fader Start×1 的 0.01 改 `KNOB_DEADZONE`，Trans 阶梯/HPF/LPF 对数范围/Echo/Delay 深度映射改配置常量；验证：probe_h2 配置断言 + 无 0.01 字面量
+- [x] H2.3 themes QSS token 化（2026-08-13 代码完成）—— QSS 内 6 色（#1a1a1a/#2a2a2a/#222222/#111111/#003300/#0d0d0d）全部改引用 ui.json token（panel_inset/panel_edge/panel_base/背景色），说明区"零硬编码"矛盾修复；验证：probe_h2 源码断言 PASS + **截图多模态核对（待切换）**
+- [x] H2.4 logger 路径+轮转+控制台兜底（2026-08-13）—— `log_dir`（显式配置优先，Windows 默认 %LOCALAPPDATA%/MrAutoDJ）+ `log_max_bytes`/`log_backup_count` 进 base.json；FileHandler→RotatingFileHandler；stderr `reconfigure(errors="replace")` 防特殊字符崩溃；验证：probe_h2 日志特殊字符（☃）写入不崩
+
+### H3. P3 清理（5 组）
+
+- [x] H3.1 def 内 import 全清（2026-08-13）—— engine/analyzer（utils 顶层导入）、main_window（tempo_compatible 用顶层已有导入 + import 顺序修正）、rotary_knob（math 顶层）、transition_manager（make_keylock_buffer 合并顶层 import）；验证：probe_h3 源码断言
+- [x] H3.2 def 内 def 提升（2026-08-13）—— tm `_work` 闭包 → 模块级 `_prepare_work(manager, next_path, my_epoch, plan)`；main_window `_on_result` 闭包 → 模块级 `_on_analysis_result(window, ...)`；验证：probe_h3 断言 + prepare/分析流程回归（冒烟）
+- [x] H3.3 glow_white 修正 + skins 收敛（2026-08-13 代码完成）—— glow_button 辉光文字改 `_GLOW_WHITE`（原纯白不一致）；jog_wheel 描边→`metal_pen(2)`、rotary_knob 高光→`top_highlight_pen(60)`；验证：probe_h3 源码断言 + **截图对比待多模态核对**
+- [x] H3.4 死代码（2026-08-13）—— settings.CONFIG_DIR 删除（含说明区）；`_detect_cues` 注解 `list[int]`→`list[dict]`；main_window `_SC.ui`→`_UI` 统一（3 处）；ui.json quota_warn_percent 保留（M3 预留）；验证：probe_h3 断言 + grep
+- [x] H3.5 说明区 + 小项（2026-08-13）—— beat_fx/main_window 说明区补配置键、deck_widget 44100 注释同步、glow_button/mini_display 文本 elide、pad_colors 空列表兜底、beat_fx 尺寸 44→48、Key Shift 双灯语义确认（Pad1/8 均复位键，双灯同亮为预期，加注释）、fade_seconds→DEFAULT_FADE_SECONDS、16777248→Qt.Key_Shift、range(8)→SLOT_COUNT；验证：probe_h3 断言 + 冒烟
+
+### H4. 验证与收尾
+
+- [x] H4.1 全量回归（2026-08-13）—— 13 个 probe（p1/p2/p3/p5/p6/g0/g1/g2/g3/h0/h1/h2/h3）**13/13 PASS** + 冒烟 OK + layout_h.png（1650×800）定稿 + 版本 ver 0.24
+- [x] H4.2 GUI 实测（2026-08-13 用户确认）—— H0 修复项复核（EQ 旋钮/进度显示/加载/分析）界面正常
+- [x] H4.3 文档同步（2026-08-13）—— z.plan.md 附录 A002 标注已修（P0-P3 ✅）、x.progress.md H 系列全部勾选、README 徽章 ver 0.24、base.json ver 0.24
+- [x] H4.4 提交 V0.24（由用户执行，Git 拆分用户决定）

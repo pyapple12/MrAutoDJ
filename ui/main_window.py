@@ -24,19 +24,19 @@ from PySide6.QtWidgets import (
 
 from config.static.static_config import get_static_config
 from modules import analyzer as analyzer_mod
-from modules.engine import AudioEngine
+from modules.engine import AudioEngine, SLOT_COUNT
 from modules.transition import tempo_compatible
-from ui.beat_fx_widget import BeatFxWidget
+from modules.transition_manager import DEFAULT_FADE_SECONDS, TransitionManager
+from ui.beat_fx_widget import BEAT_LADDER, BeatFxWidget
 from ui.deck_widget import DeckWidget
 from ui.jog_wheel import JogWheel
 from ui.pad_widget import PadWidget
+from ui.shift_state import ShiftState
 from ui.widgets.fader_slider import FaderSlider
 from ui.widgets.glow_button import GlowButton
 from ui.widgets.led_strip import LedStrip
 from ui.widgets.panel_frame import PanelFrame
 from ui.widgets.rotary_knob import RotaryKnob
-from modules.transition_manager import TransitionManager
-from ui.shift_state import ShiftState
 from utils.logger import get_logger
 
 # 静态配置解包（窗口尺寸，AGENTS.md 参数约定）
@@ -44,6 +44,14 @@ _SC = get_static_config()
 _UI = _SC.ui  # 静态配置解包（窗口尺寸/配色 token）
 
 _logger = get_logger(__name__)
+
+
+def _on_analysis_result(window, path: str, record, error) -> None:
+    # 分析 worker 回调（H3.2：原 load_library 内嵌套闭包提升为模块级函数）：
+    # 经 Qt 信号回主线程回填（错误曲目降级空记录）
+    if error is not None:
+        _logger.warning("分析失败 %s: %s", path, error)
+    window.analysis_ready.emit(path, record or analyzer_mod.empty_record())
 
 
 class MainWindow(QMainWindow):
@@ -81,7 +89,7 @@ class MainWindow(QMainWindow):
         for _letter in ("a", "b"):
             _t = QTimer(self)
             _t.setSingleShot(True)
-            _t.setInterval(int(_SC.ui.get("jog_bend_reset_ms", 80)))
+            _t.setInterval(int(_UI.get("jog_bend_reset_ms", 80)))
             _t.timeout.connect(lambda l=_letter: self._on_bend_timeout(l))
             self._bend_timers[_letter] = _t
 
@@ -138,7 +146,7 @@ class MainWindow(QMainWindow):
         lib_panel = PanelFrame("LIBRARY")
         lib_box = QVBoxLayout(lib_panel)
         lib_box.setContentsMargins(8, 8, 8, 8)
-        self._table_headers = _SC.ui.get(
+        self._table_headers = _UI.get(
             "table_headers", ["状态", "曲名", "BPM", "调性", "能量"]
         )
         self._table = QTableWidget(0, len(self._table_headers))
@@ -398,6 +406,10 @@ class MainWindow(QMainWindow):
         knobs["中"].valueChanged.connect(lambda v: deck.eq.set_mid(v))
         knobs["高"].valueChanged.connect(lambda v: deck.eq.set_high(v))
 
+    def _entry_by_path(self, path: str) -> dict | None:
+        # 曲库条目查找（H1.2：双击加载与 Instant Doubles 共用，避免重复遍历）
+        return next((e for e in self._library if e["path"] == path), None)
+
     # --- 曲库（D4.4） ---
 
     def load_library(self, folder: str, records: dict | None = None) -> int:
@@ -418,15 +430,9 @@ class MainWindow(QMainWindow):
 
         self._status(f"分析中 {len(files)} 首...")
 
-        def _on_result(path: str, record, error) -> None:
-            # worker 线程回调：经 Qt 信号回主线程回填（错误曲目降级空记录）
-            if error is not None:
-                _logger.warning("分析失败 %s: %s", path, error)
-            self.analysis_ready.emit(path, record or analyzer_mod.empty_record())
-
         threading.Thread(
             target=analyzer_mod.analyze_many,
-            args=(files, _on_result),
+            args=(files, lambda p, r, e: _on_analysis_result(self, p, r, e)),
             kwargs={"with_cues": False},
             daemon=True,
         ).start()
@@ -437,14 +443,13 @@ class MainWindow(QMainWindow):
         self._append_row(path, rec)
 
     def _append_row(self, path: str, rec: dict) -> None:
-        # 追加一行到表格与曲库列表（兼容标记随当前播放盘 BPM 刷新）
-        from modules.transition import tempo_compatible as _tc
-
+        # 追加一行到表格与曲库列表（兼容标记随当前播放盘 BPM 刷新；
+        # H3.1：tempo_compatible 顶层导入）
         bpm = float(rec.get("bpm", 0.0) or 0.0)
         key = rec.get("key", "?") or "?"
         energy = rec.get("energy", 0)
         now_bpm = self._deck_meta[self._target].get("bpm", 0.0)
-        mark = ":)" if _tc(now_bpm, bpm) else ""
+        mark = ":)" if tempo_compatible(now_bpm, bpm) else ""
         row = self._table.rowCount()
         self._table.insertRow(row)
         for col, text in enumerate(
@@ -504,7 +509,7 @@ class MainWindow(QMainWindow):
         if path_item is None:
             return
         path = path_item.data(Qt.UserRole)
-        entry = next((e for e in self._library if e["path"] == path), None)
+        entry = self._entry_by_path(path)
         if entry is None:
             return
         self._load_track_to(letter, path, entry)
@@ -518,7 +523,7 @@ class MainWindow(QMainWindow):
         if path_item is None:
             return
         path = path_item.data(Qt.UserRole)
-        entry = next((e for e in self._library if e["path"] == path), None)
+        entry = self._entry_by_path(path)
         if entry is None:
             return
 
@@ -534,7 +539,9 @@ class MainWindow(QMainWindow):
                 _logger.error("加载失败 %s: %s", path, exc)
                 return
             other_deck.play(audio)
-            other_deck._position = src_deck.position  # 同位置
+            other_deck.set_position_samples(
+                src_deck.position
+            )  # H0.4：公开方法持锁 seek
             other_widget = getattr(self, f"deck_widget_{other}")
             other_widget.set_track(path, entry["bpm"], entry["key"], audio)
             other_widget.set_playing_state(True)
@@ -606,7 +613,7 @@ class MainWindow(QMainWindow):
             entry["bpm"],
             entry["record"].get("downbeats", []),
             cue_seconds=0.0,
-            fade_seconds=16.0,
+            fade_seconds=DEFAULT_FADE_SECONDS,
             on_done=self._on_prepared_done,
         )
         self._status(f"预备中: {Path(entry['path']).name}")
@@ -666,7 +673,7 @@ class MainWindow(QMainWindow):
             else:
                 deck.hot_cue_set(idx)
         elif mode == "Beat Loop":
-            beats = [1, 2, 4, 8, 16, 32][idx % 6]
+            beats = BEAT_LADDER[idx % len(BEAT_LADDER)]
             if shift:
                 deck.set_loop(False)
             else:
@@ -683,6 +690,7 @@ class MainWindow(QMainWindow):
             else:
                 self._status(f"采样槽 {idx + 1} 未载入")
         elif mode == "Key Shift":
+            # FLX4 语义：Pad1/8 均为复位键（0 半音）→ 未移调时两灯同亮为预期行为
             semitones = [0, 1, 2, 3, -3, -2, -1, 0][idx]
             if shift:
                 deck.set_key_shift(deck.key_shift + semitones if semitones else 0)
@@ -716,14 +724,14 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event) -> None:
         # 键盘 SHIFT 驱动全局修饰状态（E2.1）
-        if event.key() == 16777248:  # Qt.Key_Shift
+        if event.key() == Qt.Key_Shift:  # Qt.Key_Shift
             self._shift.set_active(True)
             self._shift_btn.setChecked(True)
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event) -> None:
         # 键盘 SHIFT 释放
-        if event.key() == 16777248:
+        if event.key() == Qt.Key_Shift:
             self._shift.set_active(False)
             self._shift_btn.setChecked(False)
         super().keyReleaseEvent(event)
@@ -751,10 +759,10 @@ class MainWindow(QMainWindow):
         for letter, deck in (("a", self._engine.deck_a), ("b", self._engine.deck_b)):
             pad = self.pad_a if letter == "a" else self.pad_b
             if pad.mode == "Hot Cue":
-                for i in range(8):
+                for i in range(SLOT_COUNT):
                     pad.set_pad_light(i, deck.hot_cue_state(i)["has"])
             elif pad.mode == "Sampler":
-                for i in range(8):
+                for i in range(SLOT_COUNT):
                     pad.set_pad_light(i, deck.sample_state(i)["loaded"])
             elif pad.mode == "Key Shift":
                 pad.set_pad_light(0, deck.key_shift == 0)
@@ -813,4 +821,5 @@ class MainWindow(QMainWindow):
 # 设计理由：UI 只发指令（信号→引擎方法，B1 纪律）；引擎/转场注入便于无头测试；
 #   后台分析经 QueuedConnection 回主线程（Qt 线程安全）
 # 异常处理：加载/引擎关闭异常捕获不崩溃（AGENTS.md 错误策略）；分析失败曲目降级空记录
-# 关联配置：config/static/base.json（window_width/height）；ui.json（colors）
+# 关联配置：config/static/base.json（window_width/height/sample_rate）；
+#   ui.json（colors/jog_bend_reset_ms/table_headers，H3.5 补全）

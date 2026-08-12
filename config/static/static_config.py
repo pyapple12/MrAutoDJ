@@ -22,13 +22,24 @@ def _load_static_config() -> StaticConfig:
     # use_cache=False：静态配置以本模块单例为唯一缓存层，避免 file_utils
     # 缓存导致"改了 json 不生效"（开发调参困惑）
     mapping = read_json(STATIC_DIR / "config.json", default={}, use_cache=False)
+    # H0.7：类型校验——mapping 非 dict 时抛可读错误（原 AttributeError 无上下文）
+    if not isinstance(mapping, dict):
+        raise RuntimeError(
+            f"config.json 引导映射表须为对象（dict），实际: {type(mapping).__name__}"
+        )
     result: dict[str, dict[str, Any]] = {}
     for key, rel_path in mapping.items():
         data = read_json(STATIC_DIR / rel_path, default=None, use_cache=False)
         if data is None:
             raise RuntimeError(f"静态配置文件缺失或损坏: {rel_path}")
+        if not isinstance(data, dict):
+            raise RuntimeError(f"静态配置文件须为对象（dict）: {rel_path}")
         result[key] = data
-    return StaticConfig(base=result.get("base", {}), ui=result.get("ui", {}))
+    # H0.7：缺键抛错（原静默降级为空 dict，错误被各模块 .get() 兜底掩盖）
+    for key in ("base", "ui"):
+        if key not in result:
+            raise RuntimeError(f"config.json 映射缺少分类键: {key}")
+    return StaticConfig(base=result["base"], ui=result["ui"])
 
 
 _static_config_cache: StaticConfig | None = None
