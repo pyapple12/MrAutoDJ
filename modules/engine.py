@@ -241,23 +241,18 @@ class FeedbackDelay:
 
     def process(self, x: np.ndarray, frames: int) -> np.ndarray:
         # 就地处理：out = x + Σ(feedback^tap × 延迟 tap 采样)；返回 x
-        # 环形分段读取：支持块跨 delay 边界（块起始未满但块内已满的部分要读）与
-        # 缓冲回绕（read/写入越界时拆两段）
+        # 环形缓冲整块读取（零初始化天然提供初始"未充满"：pos<delay 时读到的
+        # 是缓冲尾部零区，无需 start 判断；回绕后恒有效，P1 修复）
         out = self._out[:frames]
         out[:] = x
         for tap in range(1, self._n_taps + 1):
             delay = self._delay * tap
             fb = self._feedback**tap
-            # 本块内第一个可读到延迟前样本的位置（块起始不足 delay 时前半无回声）
-            start = max(0, delay - self._pos)
-            if start >= frames:
-                continue  # 本块完全在延迟未满区
-            read = (self._pos + start - delay) % self._buf_len
-            n = frames - start
-            n1 = min(n, self._buf_len - read)
-            out[start : start + n1] += fb * self._buf[read : read + n1]
-            if n1 < n:  # 回绕到缓冲开头
-                out[start + n1 :] += fb * self._buf[0 : n - n1]
+            read = (self._pos - delay) % self._buf_len
+            n1 = min(frames, self._buf_len - read)
+            out[:n1] += fb * self._buf[read : read + n1]
+            if n1 < frames:  # 回绕到缓冲开头
+                out[n1:] += fb * self._buf[0 : frames - n1]
         # 写入（同样处理回绕）
         n1 = min(frames, self._buf_len - self._pos)
         self._buf[self._pos : self._pos + n1] = out[:n1]
@@ -330,6 +325,9 @@ class Deck:
         self._jog_touched: bool = False
         self._jog_bend_rate: float = 0.0
         self._jog_search_rate: float = 0.0
+        self._last_out_pos: int = -1  # 上次触摸输出位置（手停判定，P3）
+        self._scratch_pending: int = 0  # 未消费的搓碟位移（平滑刮擦队列）
+        self._scratch_fpos: float = 0.0  # 搓碟浮点播放位置（逐帧渐变）
         # Slip 模式：真实位置暗中推进，播放位置（_position）可被搓碟自由移动
         self._slip_active: bool = False
         self._slip_actual: int = 0
@@ -465,18 +463,22 @@ class Deck:
     # --- E1.4 Jog 转盘接口 ---
 
     def jog_touch(self, on: bool) -> None:
-        # 设置转盘触摸态（搓碟/弯音判定依据）
+        # 设置转盘触摸态（搓碟/弯音判定依据）；按下时重置浮点基准
+        # （未拖动即静音）；Slip 中松手 → 播放位置落回暗中前进的真实位置
         with self._lock:
             self._jog_touched = bool(on)
+            if on:
+                self._scratch_fpos = float(self._position)
+                self._scratch_pending = 0
+            if not on and self._slip_active and self._now_audio is not None:
+                self._position = min(self._slip_actual, len(self._now_audio))
 
     def jog_scratch(self, delta_samples: int) -> None:
-        # 搓碟：触摸时位置偏移（正负皆可，钳制曲内）
+        # 搓碟：位移入队（平滑刮擦在音频块内逐帧消费；正=向前/负=倒放）
         with self._lock:
             if self._now_audio is None:
                 return
-            self._position = max(
-                0, min(self._position + int(delta_samples), len(self._now_audio))
-            )
+            self._scratch_pending += int(delta_samples)
 
     def jog_bend(self, rate: float) -> None:
         # 弯音：临时播放速率偏移（±0.5；0=恢复原速）
@@ -710,11 +712,25 @@ class Deck:
             out[:] = self._get_chunk_reverse(frames)
             return
 
-        # Slip：真实位置按原速暗中推进，播放位置不自动前进（由 jog_scratch 控制）
-        if self._slip_active:
+        # Slip 未搓碟：正常播放（position 与真实位置同步推进，修 P3 实测
+        # "Slip 点击后滴滴滴"——原实现 Slip 激活即锁死 position）
+        if self._slip_active and not self._jog_touched:
             self._slip_actual = min(self._slip_actual + frames, len(self._now_audio))
-            self._position = max(0, min(self._position, len(self._now_audio)))
             out[:] = self._get_chunk(frames)
+            self._mix_sample(out)
+            self._position += frames
+            return
+
+        # 触摸锁定（P3 修复）：Vinyl 搓碟时位置由平滑刮擦驱动（_scratch_fill
+        # 逐帧渐变=变速播放，向前加速/向后倒放，音高随速变化=真实刮擦声）；
+        # 手停无增量 → 静音（唱盘停转）；Slip 激活时真实位置继续暗中推进
+        if self._jog_touched or self._slip_active:
+            if self._slip_active:
+                self._slip_actual = min(
+                    self._slip_actual + frames, len(self._now_audio)
+                )
+                self._position = max(0, min(self._position, len(self._now_audio)))
+            self._scratch_fill(out, frames)
             self._mix_sample(out)
             return
 
@@ -728,6 +744,23 @@ class Deck:
                 return
         elif self._jog_bend_rate != 0.0:
             step = int(round(frames * (1.0 + self._jog_bend_rate)))
+            if step != frames:
+                # 弯音变速：step 样本线性插值到 frames（防 step<frames 形状
+                # 错误致静音卡顿，且块内变速更平滑；分配取舍见文件尾说明）
+                src = self._get_chunk(step)
+                idx = np.linspace(0.0, step - 1.0, frames)
+                i0 = idx.astype(np.int64)
+                i1 = np.minimum(i0 + 1, step - 1)
+                w = (idx - i0).astype(np.float32)[:, None]
+                out[:] = src[i0] * (1.0 - w) + src[i1] * w
+            else:
+                out[:] = self._get_chunk(frames)
+            self._position += step
+            # Sampler 叠加（在 EQ 前混入采样）
+            self._mix_sample(out)
+            if not self._loop_active and self._position >= len(self._now_audio):
+                self.state = State.IDLE
+            return
 
         if step != frames:
             chunk = self._get_chunk(step)
@@ -741,6 +774,41 @@ class Deck:
 
         if not self._loop_active and self._position >= len(self._now_audio):
             self.state = State.IDLE
+
+    def _scratch_fill(self, out: np.ndarray, frames: int) -> None:
+        # 平滑刮擦填充（P3 增强）：把未消费的搓碟位移在块内逐帧均匀渐变
+        # （线性插值变速播放——向前=加速、向后=倒放，音高随速变化即真实
+        # 刮擦声）；位移钳制曲内；无位移 → 静音（手停）
+        audio = self._now_audio
+        if audio is None or len(audio) == 0:
+            out[:] = 0
+            return
+        pending = self._scratch_pending
+        if pending == 0:
+            out[:] = 0
+            return
+        # 钳制：播放头停在曲内边界（反向 0 / 正向 len-1）；未消费部分丢弃
+        # （刮过头 = 手停住，下一块重新等新增量）
+        hi = len(audio) - 1
+        fpos = self._scratch_fpos
+        if pending > 0:
+            pending = min(pending, hi - fpos)
+        else:
+            pending = max(pending, -fpos)
+        self._scratch_pending = 0
+        if pending == 0:
+            out[:] = 0
+            return
+        # 每帧位置 = fpos + i×(pending/frames)，线性插值取样本
+        vel = pending / frames
+        idx = fpos + np.arange(frames, dtype=np.float32) * vel
+        i0 = idx.astype(np.int64)
+        i1 = np.minimum(i0 + 1, hi)
+        frac = (idx - i0).astype(np.float32)[:, None]
+        out[:] = audio[i0] * (1.0 - frac) + audio[i1] * frac
+        self._scratch_fpos = fpos + pending
+        self._position = max(0, min(int(round(self._scratch_fpos)), len(audio)))
+        self._last_out_pos = self._position
 
     def _fill_mixing(self, out: np.ndarray, frames: int) -> None:
         # 交叉淡化填充：逐帧线性渐变（可叠加等功率由外层调用方换算）

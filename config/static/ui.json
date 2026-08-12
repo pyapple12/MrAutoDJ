@@ -8,5 +8,9 @@
     "danger": "#ff4444"
   },
   "table_headers": ["状态", "曲名", "BPM", "调性", "能量"],
-  "quota_warn_percent": 80
+  "quota_warn_percent": 80,
+  "jog_bend_reset_ms": 80,
+  "jog_bend_step": 0.05,
+  "jog_scratch_gain": 256,
+  "jog_scratch_speed_ref": 800
 }

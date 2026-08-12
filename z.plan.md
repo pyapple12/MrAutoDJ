@@ -197,29 +197,46 @@ MrAutoDJ：从虚拟 DJ 台起步，逐步演进为 AI 自动 DJ 与 LLM 电台�
   - [x] 波形显示（离线峰值缓存 + 播放头滚动）、深色主题（ui.json 驱动）
   - [x] UI 集成：曲库表格/双盘控件/混音台/Prepare/Mix、跨线程信号回填
   - [x] 集成验证：无头引擎探针、端到端脚本、GUI 无头初始化、冒烟
-- [ ] **M1.5 FLX4 交互复刻**（V0.2，依据 w.study.md B13 报告）
+- [x] **M1.5 FLX4 交互复刻**（V0.2，2026-08 完成，依据 w.study.md B13 报告，任务明细见 x.progress.md E 系列）
   > 定位：在 M1 基础上按 FLX4 面板一比一补全交互与功能（保留 M1 的曲库/分析/变速转场能力，叠加 FLX4 操作体系）
-  - [ ] **引擎支撑层**
-    - [ ] Hot Cue 槽位：每盘 8 个（存/跳/删/预听 + 灯态查询）
-    - [ ] Beatgrid 跳转：Beat Jump（±1/2/4/8 拍）与 Skip 模式（Vinyl 关时）
-    - [ ] Key Shift 半音：±12 半音 + 复位（Keylock 预渲染管线扩展）
-    - [ ] Jog 引擎接口：搓碟（scratch 位置偏移）/ 弯音（Pitch Bend）/ 触摸检测 / SHIFT 高速搜索
-    - [ ] VU 电平采集（方案 C）：回调内峰值写入预分配数组（零运行时分配），UI 定时器读取
-    - [ ] Slip 模式：隐藏播放头（Slip 期间曲目暗中前进，结束后落回）
-    - [ ] Sampler 槽位：每盘采样载入/播放/停止/卸载
-    - [ ] 效果库扩展：Echo / Delay（延迟线）+ 既有 HPF/LPF/Trans，可组合链
-    - [ ] Fader Start / Tap BPM / Censor / Stutter 支撑
-  - [ ] **UI 交互层**
-    - [ ] 全局 SHIFT 组合键体系（键盘 SHIFT + 点击 = 第二功能，全控件）
-    - [ ] Pad 打击垫组件（1×8 网格 + 模式切换：Hot Cue / Beat Loop / Beat Jump / Sampler / Key Shift）
-    - [ ] Jog 转盘控件（**交互：外圈滚轮=弯音、顶面按住拖动=搓碟**、触摸检测、SHIFT+转=高速搜索、Vinyl 模式开关）
-    - [ ] Beat FX 面板（通道选择 + 效果库 + 拍数 ± + BPM Auto/Tap + LEVEL/DEPTH）
-    - [ ] Mixer 补全：TRIM 预增益、VU 电平指示、Fader Start、Tap BPM
-    - [ ] Instant Doubles（LOAD 双按 = 复制曲目到另一盘同位置播放）
-    - [ ] LED 灯态体系（按钮高亮/灯阵反映引擎状态，如 Hot Cue、Key Shift 灯阵）
-    - [ ] 表演功能：Slip / Censor / Stutter（按键触发）
-  - [ ] **UI 四区布局重排**（Browse + 双 Deck + Mixer + Effects，按 FLX4 面板；核心功能完成后执行）
-  - [ ] 集成验证：无头探针 + 端到端 + 冒烟；提交 `feat: V0.2`
+  - [x] **引擎支撑层**：Hot Cue 8 槽、Beatgrid 跳转与 Skip、Key Shift 半音预渲染、Jog 接口（搓碟/弯音/触摸/搜索）、VU 采集（预分配环形）、Slip 模式、Sampler 8 槽、Echo/Delay 效果库、Fader Start/Tap BPM/Censor/Stutter、TRIM 预增益、Beat FX 链
+  - [x] **UI 交互层**：全局 SHIFT 组合键、Pad 打击垫（5 模式 + LED 灯态）、Jog 转盘（滚轮弯音/拖动搓碟）、Beat FX 面板、Mixer 补全（TRIM/VU/Fader Start/Tap）、Instant Doubles、LED 灯态联动、表演功能键
+  - [x] **UI 四区布局重排**：Browse 顶栏（LOAD A/B + 搜索）+ 双 Deck + Mixer/Effects，保留 M1 曲库与 Prepare/Mix
+  - [x] 集成验证：无头探针 probe_m15 + 端到端 verify_m15 + 冒烟
+  - [x] Beat FX 修复：效果/深度/开关统一状态应用；延迟线环形缓冲回绕分段读取
+  - [ ] 待修复问题（y.problem.md，修复轮排在 M1.6 之前）：
+    - [x] P1 Echo 回绕跳读（2026-08-12 已修：删 start 判断恒从块头读；无头验证 + GUI 听测确认）
+    - [x] P2 弯音不归零（2026-08-12 已修：单发 QTimer 累积归零 + 减速插值防卡顿；GUI 实测确认）
+    - [ ] P3 搓碟语义：触摸锁定播放 + 位置跟手 + 释放续播，按 B13-3.16 语义实现
+    - P5 Pitch 滑块无效果（M1 遗留占位）——📌 **V0.21 之后修复**，见 y.problem.md
+- [ ] **M1.6 UI 拟物改版**（V0.21，方案 2026-08-10 与用户讨论定稿；与 P1-P3 修复同属 V0.21，任务明细见 x.progress.md F 系列）
+  > 定位：把 M1.5 的四区布局从"标准 Qt 控件 + QSS"升级为 **QPainter 自绘拟物原语体系**（Mixxx 皮肤同路线），视觉对标 FLX4/Rekordbox 现代硬件面板；只改视觉层，引擎与交互逻辑零改动
+  - [ ] **方案决策**（已定稿）：
+    - 路线 B：自绘控件原语库——QSS 堆质感做不出旋钮/推子，治标不治本；不做 SVG 贴图（素材重活）与 QML 重构（现有代码作废）
+    - 风格：现代 DJ 台质感——深灰蓝黑金属面板 + 内凹槽 + 丝印标题 + 橙/蓝/绿/白背光（Pioneer 色系）
+    - 原则：原语控件零业务依赖（不 import modules/），只做外观与交互、只发信号；业务逻辑留在现有 deck_widget/beat_fx_widget/pad_widget 组合层
+    - 性能：静态层（面板纹理/刻度环/凹槽）一次渲染到 QPixmap 缓存，paintEvent 只 blit + 重绘动态部件；灯态沿用定时器低频刷新，不碰实时音频线程
+  - [ ] **配色体系**（token 进 ui.json）：panel_base/panel_edge/panel_inset/silk_text、glow_orange/blue/green/white、pad_color[5]（五模式色）
+  - [ ] **控件原语库** `ui/widgets/`（全 paintEvent 自绘）：
+    - RotaryKnob 旋钮（刻度环+指针+中心帽；垂直拖拽/滚轮/双击复位）→ TRIM/EQ×3/MASTER/LEVEL/DEPTH
+    - FaderSlider 推子（内凹槽+中央刻度线+拉丝金属帽）→ 通道推子×2/横推/Tempo（Tempo 带量程标签 ±6/10/16/WIDE）
+    - GlowButton 背光按钮（内凹座+按压辉光+LED 灯态+模式色）→ 全按钮/LOAD/Pad/模式键
+    - LedStrip LED 灯柱（分段亮起 绿→黄→红）→ VU 表替换/Beat FX 拍数指示
+    - MiniDisplay 小屏（黑底+绿字 7 段数字感）→ BPM/拍数/曲名
+    - PanelFrame 面板容器（渐变底+圆角+顶部高光+丝印标题）→ 四区容器
+  - [ ] **组合替换映射**：Mixer 区（PanelFrame + RotaryKnob×6 + FaderSlider×3 + LedStrip×2 + GlowButton）／Deck 区（PanelFrame + GlowButton + Jog 升级为金属圈+指示环+中心屏 + Pad 背光化）／Beat FX（PanelFrame + RotaryKnob + MiniDisplay + LedStrip）／Browse（PanelFrame + GlowButton）
+  - [ ] **布局核对机制**（与用户双向可核对，2026-08-11 更新为多模态主模型路线）：
+    - 布局规格单 `docs/ui_layout.md`：ASCII 布局图 + 部件表格（位置/尺寸/间距/对齐），每次改动先更新，双方核对单一真相源，防口口相传走样
+    - 无头渲染截图：`QT_QPA_PLATFORM=offscreen` + `widget.grab()` → `.temp/ui_preview/layout_vN.png`（不进 git），每轮布局改动自动出图；**主模型换为多模态后 AI 可直接读图核对**（与用户可见效果一致），仍需用户确认最终视觉
+    - 用户反馈方式：ASCII 布局图／文字描述／截图标注 → 1px 级迭代
+    - 布局意图来源：参照 FLX4 面板实物/官方图（用户提供参考图到 `.temp/design_ref/`，或 FLX4 官方面板图）+ B13 部件清单 + 用户口述偏好，均先转成布局规格单再实现
+  - [ ] **实施顺序**（每步独立可验证、可回退）：
+    - Step 1：ui.json 配色 token + PanelFrame + RotaryKnob + GlowButton 三个原语
+    - Step 2：替换 Mixer 区（旋钮密集区，效果立竿见影）+ 无头截图核对
+    - Step 3：FaderSlider + 替换推子/Tempo
+    - Step 4：Jog 转盘视觉升级 + Pad/Beat FX 背光化
+    - Step 5：全量替换 + 无头初始化验证 + 截图定稿；提交（Git 拆分由用户决定）
+  - [ ] 集成验证：无头初始化 + 无头截图 + 冒烟；GUI 实测核对背光/灯态交互
 - [ ] **M2 第二步：AI 自动 DJ**
   - [ ] 兼容性评分：BPM 倍频归一化 / Camelot 档位 / 能量曲线 / 音色 / 人声冲突
   - [ ] 调和混音（Camelot 轮盘）选曲与 Set 规划（同艺人约束/去重/能量弧线）
@@ -235,3 +252,72 @@ MrAutoDJ：从虚拟 DJ 台起步，逐步演进为 AI 自动 DJ 与 LLM 电台�
 ## 参考项目（来自上文调研）
 
 Mixxx（架构参照）、pyCrossfade、ai-remixmate、radio-dj、WrzDJ（点歌台）、mixx-dj-mcp（LLM 控制 Mixxx 思路）
+
+---
+
+## 附录：布局核对方案演进记录（2026-08-11 更新：多模态主模型路线替代 Figma MCP）
+
+> 演进历程：
+>
+> 1. 2026-08-10 初稿：Figma MCP 接入方案（下述原文保留备查）——当时主模型 deepseek-v4-flash 无视觉能力，MCP 的结构化数据（JSON 坐标/颜色）是无视觉下精确核对的唯一路径
+> 2. 2026-08-11 决策：**用户选择更换多模态主模型（方案 A）**，AI 可直接读图——Figma MCP 降级为备选；布局意图来源改为"FLX4 面板参考图（`.temp/design_ref/`）+ B13 部件清单 + 用户描述"；无头截图由 AI 直接读图核对，与用户可见效果一致
+> 3. 2026-08-11 实测补充：**默认模型（deepseek-v4-flash）实测仍无法读图**（read 工具报错 Cannot read）；多模态能力需用户手动切换模型（如 Qwen3.8 max）获得——约定见 AGENTS.md"多模态模型约定"；后续所有读图类任务（F4.3 参考图分析、F5.7/F6.6 截图核对）启动前须通知用户切换模型
+> 4. 若日后用户使用 Figma，可恢复 MCP 路线（下述配置原文），两条路线可并存（MCP 拿精确数值、读图看整体效果）
+
+---
+
+### （原文备查）Figma MCP 接入方案（2026-08-10 定稿）
+
+> 目的：让 AI 直接读取 Figma 设计稿的精确布局数据（布局树/绝对坐标/像素尺寸/样式），替代"截图猜位置"，实现 1px 级布局核对
+
+### 1. 解决的问题
+
+- 截图核对只能"看大概效果"，拿不到精确坐标/尺寸/层级
+- 布局规格单（docs/ui_layout.md）若手工誊写易走样，直接从设计稿抽取则零误差
+- 视觉 token（颜色/字距）直接从设计稿提取，对齐 ui.json 配色体系
+
+### 2. 配置（写入 `.opencode/opencode.json` 的 mcp 段）
+
+```json
+{
+  "mcp": {
+    "figma": {
+      "type": "local",
+      "command": ["npx", "-y", "figma-developer-mcp", "--stdio"],
+      "environment": { "FIGMA_API_KEY": "..." }
+    }
+  }
+}
+```
+
+- 需要：Figma API token（个人访问令牌，Figma 账号设置 → Security → Personal access tokens）
+- 注意：配置修改后需重启 opencode 生效；token 属凭据，不得写入 git（.opencode/ 已在 .gitignore 中）
+- 备选：figma-developer-mcp 支持 `--scope=personal` 或 `--scope=team`，如组织受限用 team scope + 添加文件 key
+
+### 3. 工作流（设计 → 代码 → 核对闭环）
+
+```
+用户在 Figma 画布局稿 → 分享给 AI（file key）
+  → AI 通过 MCP 读取：文件列表/帧层级/节点绝对坐标与尺寸/fill 颜色/文本内容（全部为文本数据，无需视觉）
+  → 生成布局规格单 docs/ui_layout.md（部件表格：位置/尺寸/间距/对齐/配色）
+  → 按规格单实现 Qt 原语与布局（M1.6）
+  → 无头渲染截图 .temp/ui_preview/ → 对照设计稿 → 偏差反馈 → 迭代
+```
+
+### 4. 具体核对项（MCP 可提供的精确数据）
+
+| 数据                                | MCP 接口                      | 用途                    |
+| ----------------------------------- | ----------------------------- | ----------------------- |
+| 文件与页面列表                      | `get_file` / `get_file_nodes` | 定位设计稿              |
+| 节点布局树（frame/组/实例）         | `get_file_nodes`（节点递归）  | 翻译成 Qt 布局层级      |
+| 绝对坐标 + 尺寸（x/y/width/height） | 节点 `absoluteBoundingBox`    | 布局规格单的精确数值    |
+| 填充色/描边/效果                    | 节点 `fills/strokes/effects`  | 生成 ui.json 配色 token |
+| 文本内容/字体                       | 节点 `characters/style`       | 丝印标题/标签文案       |
+| 渲染图                              | `get_image`                   | 对照预览（含导出参数）  |
+
+### 5. 落地条件与前置
+
+- [ ] 用户提供 Figma API token（或确认使用 figma-developer-mcp 的 OAuth 方式）
+- [ ] 用户创建/导入 FLX4 布局设计稿（或自定义布局稿），分享文件权限给 token 所属账号
+- [ ] 在 M1.6 Step 1（配色 + 原语）之前完成配置，使 Step 2（Mixer 区替换）直接按设计稿坐标实现
+- 备注：非 Figma 设计工具（Sketch/XD/PS）无成熟 MCP，届时退回"导出 PNG + 读图核对"方式

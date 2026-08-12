@@ -1,6 +1,6 @@
 # MrAutoDJ —— 虚拟 DJ 台与 AI 电台
 
-[![Version](https://img.shields.io/badge/Version-ver%200.01-blue.svg)](config/static/base.json)
+[![Version](https://img.shields.io/badge/Version-ver%200.21-blue.svg)](config/static/base.json)
 [![Python](https://img.shields.io/badge/Python-3.14+-green.svg)](https://www.python.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -32,13 +32,22 @@ GUI 基于 PySide6，音频引擎基于 python-sounddevice 实时回调，分析
 
 （开发中，里程碑见 `z.plan.md`）
 
-- **虚拟 DJ 台（M1）**：
+- **虚拟 DJ 台（M1，V0.1）**：
   - 双打碟机：播放/暂停/CUE/循环/变速
   - 波形显示：离线分析 + 实时滚动
   - 三频 EQ + 横推（Crossfader）
   - Pitch 变速 + Keylock（变调不变速）
   - 自动 BPM/调性分析（librosa，缓存复用）
   - 双输出声卡（耳机监听）
+- **FLX4 交互复刻（M1.5，V0.2）**：
+  - 四区布局：Browse（LOAD A/B）/ 双 Deck / Mixer / Effects
+  - Hot Cue 8 槽、Beat Jump、Key Shift 半音、Slip 模式
+  - Pad 打击垫（Hot Cue / Beat Loop / Beat Jump / Sampler / Key Shift 五模式 + LED 灯态）
+  - Jog 转盘（外圈滚轮=弯音、顶面拖动=搓碟、Vinyl 开关）
+  - Beat FX 效果库（HPF/LPF/Trans/Echo/Delay + 拍数 + 深度）
+  - Mixer 补全：TRIM / VU 表 / Fader Start / Tap BPM
+  - 表演功能：Censor / Stutter / Instant Doubles
+  - 全局 SHIFT 组合键体系
 - **AI 自动 DJ（M2）**：
   - 调和混音（Camelot 轮盘）选曲
   - 节拍对齐自动转场（EQ 渐变）
@@ -76,6 +85,14 @@ py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe main.py --version
 ```
 
+### 界面操作（V0.2 四区布局）
+
+- **BROWSE 顶栏**：LOAD A / LOAD B（加载选中曲到指定盘）、搜索曲库、打开文件夹、目标盘切换、SHIFT
+- **曲库**：双击曲目加载到目标盘（500ms 内再双击 = Instant Doubles 复制到另一盘）
+- **双 Deck**：播放/CUE/循环/Beatloop/Pitch；右侧 **Jog 转盘**（外圈滚轮=弯音、顶面按住拖动=搓碟、SHIFT+滚=高速搜索、Vinyl 勾选切换）+ **Pad 打击垫**（5 模式：Hot Cue/Beat Loop/Beat Jump/Sampler/Key Shift）+ Slip/Censor/Stutter 表演键
+- **MIXER**：TRIM 预增益、三频 EQ、VU 电平、Fader Start（推子联动播放）、Tap BPM、横推、主音量
+- **EFFECTS**：Beat FX 面板（选效果 → 拉 DEPTH → 点 FX ON 生效）、Prepare 来曲 → Mix Now（变速转场）
+
 ### 命令行模式
 
 （各模块提供独立 CLI，开发中）
@@ -91,9 +108,12 @@ py -3.14 -m venv .venv
 MrAutoDJ/
 ├── main.py                    # 主入口：GUI 分发，版本号单一来源（base.json version 字段）
 ├── modules/                   # 业务核心层（无 GUI 依赖，可独立测试）
-│   ├── engine.py              # 音频引擎：双 deck / 混音 / EQ / 横推（实时线程）
+│   ├── engine.py              # 音频引擎：双 deck / 混音 / EQ / 横推 / Jog / Hot Cue / Slip / Sampler / Beat FX
 │   ├── analyzer.py            # 曲目分析：BPM / 调性 / 能量 / 拍点（librosa）
 │   ├── library.py             # 曲库：扫描 / 分析缓存（SQLite 只读）
+│   ├── transition.py          # 转场规划（八度折叠 / skip-stretch 判定）
+│   ├── stretcher.py           # 变速/变调预渲染（rubberband 封装）
+│   ├── transition_manager.py  # 转场编排（prepare/mix_now/Key Shift 预渲染）
 │   ├── automix.py             # AI 自动编排：兼容性评分 / 转场计划 / Set 规划
 │   └── radio.py               # 电台调度：LLM 导演 / 混合播放队列 / 点歌
 ├── config/
@@ -104,9 +124,14 @@ MrAutoDJ/
 │       ├── base.json          # 应用参数（版本/采样率/块大小/缓存路径等）
 │       └── ui.json            # UI 参数（颜色/阈值/表头）
 ├── ui/                        # GUI 层（PySide6）
-│   ├── main_window.py         # 主窗口（双盘/波形/混音台布局）
+│   ├── main_window.py         # 主窗口（四区布局：Browse + 双 Deck + Mixer/Effects）
 │   ├── deck_widget.py         # 打碟机控件
 │   ├── waveform_widget.py     # 波形绘制
+│   ├── jog_wheel.py           # Jog 转盘（弯音/搓碟/搜索/Vinyl）
+│   ├── pad_widget.py          # 打击垫（5 模式 + 灯态）
+│   ├── beat_fx_widget.py      # Beat FX 面板
+│   ├── vu_meter.py            # VU 电平表
+│   ├── shift_state.py         # 全局 SHIFT 修饰状态
 │   └── themes.py              # 主题 QSS
 ├── data/                      # 静态数据（预留）
 ├── utils/                     # 通用工具（零业务依赖）
@@ -116,6 +141,10 @@ MrAutoDJ/
 │   └── convert.py             # 弹性类型转换（宽容解析）
 ├── .reference/                # 参考仓库与硬件资料（外部 clone，不纳入版本控制）
 ├── tools/rubberband/          # 内置变速引擎（GPL 便携构建，兜底方案，随仓库分发）
+├── z.plan.md                  # 项目规划与里程碑
+├── w.study.md                 # 源码研读报告（含 B13 FLX4 学习报告）
+├── x.progress.md              # 任务清单（D/E 系列）
+├── y.problem.md               # 已知问题记录（P1-P3 待评估）
 ├── requirements.txt           # Python 依赖列表
 ├── LICENSE                    # MIT 许可证
 └── README.md                  # 本文件

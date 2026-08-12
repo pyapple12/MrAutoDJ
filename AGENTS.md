@@ -96,3 +96,4 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 - 执行命令前先检测当前 shell（Windows 下为 pwsh）：使用 PowerShell 兼容命令（`Select-String` 替代 `grep`，`Get-ChildItem` 替代 `ls` 等），避免 Linux-only 工具
 - pwsh 会话带 `-NoProfile` 不加载 `$PROFILE`，输出中文前必须先设置编码：`[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;`
 - 未经用户明确要求，不得擅自执行 `git add`、`git commit` 或任何其他 Git 写操作
+- **多模态模型约定**：当前默认模型 deepseek-v4-flash **无视觉能力**（读图工具返回 `Cannot read: this model does not support image input`）；需要读图的任务（UI 截图核对、参考图分析、布局规格单生成等）**必须先通知用户切换多模态模型**（如 Qwen3.8 max）再执行；**未实际读到图时严禁声称"能读到"或编造图片内容**——图读失败如实报告

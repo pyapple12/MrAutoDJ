@@ -68,6 +68,15 @@ class MainWindow(QMainWindow):
         # Beat FX 目标盘配置（E2.4 面板 → 引擎）
         self._beat_fx_effect: str = ""
         self._beat_fx_depth: float = 0.0
+        # 弯音脉冲归零（P2 修复）：每盘 pending 值 + 单发定时器（超时调 jog_bend(0)）
+        self._bend_pending: dict = {"a": 0.0, "b": 0.0}
+        self._bend_timers: dict = {}
+        for _letter in ("a", "b"):
+            _t = QTimer(self)
+            _t.setSingleShot(True)
+            _t.setInterval(int(_SC.ui.get("jog_bend_reset_ms", 80)))
+            _t.timeout.connect(lambda l=_letter: self._on_bend_timeout(l))
+            self._bend_timers[_letter] = _t
 
         self.setWindowTitle("MrAutoDJ")
         w = int(_SC.base.get("window_width", 1280))
@@ -328,8 +337,7 @@ class MainWindow(QMainWindow):
             ("a", self.jog_a, self._engine.deck_a),
             ("b", self.jog_b, self._engine.deck_b),
         ):
-            jog.bend_changed.connect(lambda v, d=deck: d.jog_bend(v))
-            jog.bend_changed.connect(lambda v: self._on_bend_release(v))
+            jog.bend_changed.connect(lambda v, l=letter: self._on_bend_release(l, v))
             jog.search_changed.connect(lambda v, d=deck: d.jog_search(v))
             jog.search_changed.connect(lambda v: self._on_search_release(v))
             jog.scratch_moved.connect(lambda s, d=deck: d.jog_scratch(s))
@@ -602,10 +610,20 @@ class MainWindow(QMainWindow):
         if bpm > 0:
             self._status(f"DECK {letter.upper()} Tap BPM: {bpm:.1f}")
 
-    def _on_bend_release(self, v: float) -> None:
-        # 弯音信号发出后延迟归零（简化为立即归零：滚轮一格一次弯音）
+    def _on_bend_release(self, letter: str, v: float) -> None:
+        # 弯音累积语义（P2 修复）：每格在 pending 上累加（同向滚动弯得更多，
+        # 反向抵消），钳制 ±0.5；重启单发定时器，超时后 jog_bend(0) 归零
         if abs(v) > 0.01:
-            self._bend_timer_pending = v
+            self._bend_pending[letter] = max(
+                -0.5, min(0.5, self._bend_pending[letter] + v)
+            )
+            getattr(self._engine, f"deck_{letter}").jog_bend(self._bend_pending[letter])
+            self._bend_timers[letter].start()
+
+    def _on_bend_timeout(self, letter: str) -> None:
+        # 弯音定时归零：脉冲结束恢复原速
+        getattr(self._engine, f"deck_{letter}").jog_bend(0.0)
+        self._bend_pending[letter] = 0.0
 
     def _on_search_release(self, v: float) -> None:
         # 搜索信号记录（释放时归零由 jog 自身轮转处理；此处仅占位）
