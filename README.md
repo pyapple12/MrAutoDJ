@@ -1,6 +1,6 @@
 # MrAutoDJ —— 虚拟 DJ 台与 AI 电台
 
-[![Version](https://img.shields.io/badge/Version-ver%200.24-blue.svg)](config/static/base.json)
+[![Version](https://img.shields.io/badge/Version-ver%200.25-blue.svg)](config/static/base.json)
 [![Python](https://img.shields.io/badge/Python-3.14+-green.svg)](https://www.python.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -89,7 +89,7 @@ py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe main.py --version
 ```
 
-### 界面操作（V0.2 四区布局）
+### 界面操作（V0.22 拟物五列布局）
 
 - **BROWSE 顶栏**：LOAD A / LOAD B（加载选中曲到指定盘）、搜索曲库、打开文件夹、目标盘切换、SHIFT
 - **曲库**：双击曲目加载到目标盘（500ms 内再双击 = Instant Doubles 复制到另一盘）
@@ -115,6 +115,7 @@ MrAutoDJ/
 │   ├── engine.py              # 音频引擎：双 deck / 混音 / EQ / 横推 / Jog / Hot Cue / Slip / Sampler / Beat FX
 │   ├── analyzer.py            # 曲目分析：BPM / 调性 / 能量 / 拍点（librosa）
 │   ├── library.py             # 曲库：扫描 / 分析缓存（SQLite 只读）
+│   ├── audio_decode.py        # 统一音频解码（pydub + 位深归一化，engine/analyzer 共用）
 │   ├── transition.py          # 转场规划（八度折叠 / skip-stretch 判定）
 │   ├── stretcher.py           # 变速/变调预渲染（rubberband 封装）
 │   ├── transition_manager.py  # 转场编排（prepare/mix_now/Key Shift 预渲染）
@@ -128,7 +129,7 @@ MrAutoDJ/
 │       ├── base.json          # 应用参数（版本/采样率/块大小/缓存路径等）
 │       └── ui.json            # UI 参数（颜色/阈值/表头）
 ├── ui/                        # GUI 层（PySide6）
-│   ├── main_window.py         # 主窗口（五列布局：LIBRARY + 双 Deck + Mixer + Effects）
+│   ├── main_window.py         # 主窗口（五列布局：LIBRARY | DECK A | MIXER | DECK B | EFFECTS）
 │   ├── deck_widget.py         # 打碟机控件
 │   ├── waveform_widget.py     # 波形绘制
 │   ├── jog_wheel.py           # Jog 转盘（弯音/搓碟/搜索/Vinyl/中心屏）
@@ -151,9 +152,9 @@ MrAutoDJ/
 │   └── convert.py             # 弹性类型转换（宽容解析）
 ├── .reference/                # 参考仓库与硬件资料（外部 clone，不纳入版本控制）
 ├── tools/rubberband/          # 内置变速引擎（GPL 便携构建，兜底方案，随仓库分发）
-├── z.plan.md                  # 项目规划与里程碑
+├── z.plan.md                  # 项目规划与里程碑（含全量代码审计报告附录）
 ├── w.study.md                 # 源码研读报告（含 B13 FLX4 学习报告）
-├── x.progress.md              # 任务清单（D/E/F 系列）
+├── x.progress.md              # 任务清单（D/E/F/G/H/I 系列）
 ├── y.problem.md               # 已知问题记录（P1-P4）
 ├── docs/ui_layout.md          # 布局规格单（FLX4 四区 ASCII + 部件表）
 ├── requirements.txt           # Python 依赖列表

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QCheckBox, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QVBoxLayout, QWidget
 
 from config.static.static_config import get_static_config
 from ui.widgets._skins import metal_gradient, metal_pen

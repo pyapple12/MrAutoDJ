@@ -25,5 +25,6 @@
   "jog_search_step": 4.0,
   "wheel_step_divisions": 20,
   "led_green_threshold": 0.6,
-  "led_yellow_threshold": 0.85
+  "led_yellow_threshold": 0.85,
+  "led_segments": 12
 }

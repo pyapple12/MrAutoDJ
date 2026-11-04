@@ -9,11 +9,12 @@ from PySide6.QtWidgets import QWidget
 
 from config.static.static_config import get_static_config
 
-# 静态配置解包（小屏配色）
+# 静态配置解包（小屏配色；accent 在 colors 子对象内，I2.1 修正层级）
 _SC = get_static_config()
 _UI = _SC.ui
+_UI_COLORS = _UI.get("colors", {})
 _SCREEN_BG = QColor(10, 12, 12)  # 屏底色（固定黑，不随主题）
-_GREEN = QColor(_UI.get("accent", "#00ff41"))
+_GREEN = QColor(_UI_COLORS.get("accent", "#00ff41"))
 _RADIUS = 4
 
 
@@ -49,12 +50,14 @@ class MiniDisplay(QWidget):
         p.fillPath(path, _SCREEN_BG)
         if self._text:
             # H3.5：超宽文本省略号（防溢出屏体）
-            elided = p.fontMetrics().elidedText(self._text, Qt.ElideRight, int(w - 8))
-            # 辉光层：半透明粗描边
-            p.setPen(QColor(_GREEN.red(), _GREEN.green(), _GREEN.blue(), 90))
+            # I3.5：先 setFont 再度量（原用默认字体度量、粗体绘制，宽度不一致
+            # 导致 elide 判定与实际渲染错位）
             font_bold = QFont(self.font())
             font_bold.setPointSizeF(max(8.0, h * 0.55))
             p.setFont(font_bold)
+            elided = p.fontMetrics().elidedText(self._text, Qt.ElideRight, int(w - 8))
+            # 辉光层：半透明粗描边
+            p.setPen(QColor(_GREEN.red(), _GREEN.green(), _GREEN.blue(), 90))
             p.drawText(rect.adjusted(1, 0, -1, 0), Qt.AlignCenter, elided)
             # 正文层：实色
             p.setPen(_GREEN)
@@ -67,4 +70,5 @@ class MiniDisplay(QWidget):
 #   set_text(str)/text()：显示文本；双层绘制（半透明描边 = 辉光，实色 = 正文）
 # 设计理由：荧光绿等宽文字模拟 7 段数码管观感（M1.6 规格单）；
 #   屏底色固定黑（硬件屏幕本色），辉光用半透明描边零成本模拟
-# 关联配置：config/static/ui.json（accent 荧光绿）
+# 关联配置：config/static/ui.json（colors.accent 荧光绿，colors 子对象键，
+#   I2.1 修正读取层级）

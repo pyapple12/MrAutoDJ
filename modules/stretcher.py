@@ -170,17 +170,35 @@ def _render_via_cli(
     args_fn: Callable[[str], list[str]],
     prefix: str,
     progress_callback: Callable[[float], None] | None = None,
+    aux_files: dict[str, str] | None = None,
 ) -> np.ndarray:
-    # 公共渲染管道（H1.4）：tmpdir → 写 in.wav → 组命令 → 运行 → 读回校验 → 清理
-    # args_fn(tmpdir) 返回额外命令行参数（如 -M timemap / --pitch）；prefix 为临时目录前缀
+    # 公共渲染管道（H1.4）：tmpdir → 写 in.wav → 附加临时文件 → 组命令 → 运行 →
+    # 读回校验 → 清理；args_fn(tmpdir) 返回额外命令行参数（如 -M timemap / --pitch）；
+    # aux_files 为附加临时文件（文件名→内容，文件名由调用方字面量给定），写入前
+    # 规范化 + 包含校验（Mimosa 整改：写路径仅由本地 mkdtemp 目录 + 固定名构成）
     if audio.ndim != 2 or audio.shape[1] != 2:
         raise ValueError(f"expected stereo (N, 2) audio, got shape {audio.shape}")
+    # I3.1：缺失前置检查（原 [None, ...] 进 subprocess 报晦涩 TypeError）
+    rb = rubberband_bin()
+    if rb is None:
+        raise RuntimeError(
+            "未找到 rubberband 可执行文件（变速/变调渲染不可用）："
+            "请安装 rubberband、设置 RUBBERBAND_BIN 环境变量，"
+            "或确认项目内置 tools/rubberband/ 存在"
+        )
     tmpdir = tempfile.mkdtemp(prefix=prefix)
-    in_path = os.path.join(tmpdir, "in.wav")
-    out_path = os.path.join(tmpdir, "out.wav")
+    base = Path(tmpdir).resolve()  # 规范化临时目录（防相对路径歧义）
+    in_path = str(base / "in.wav")
+    out_path = str(base / "out.wav")
     try:
         sf.write(in_path, audio, sample_rate, subtype="FLOAT")
-        cmd = [rubberband_bin(), "-3"] + args_fn(tmpdir) + [in_path, out_path]
+        # 附加临时文件（如 timemap）：文件名固定、目录本地创建，越界即拒绝
+        for fname, text in (aux_files or {}).items():
+            aux = (base / fname).resolve()
+            if aux.parent != base:
+                raise RuntimeError(f"临时文件路径越界: {aux}")
+            aux.write_text(text, encoding="utf-8")
+        cmd = [rb, "-3"] + args_fn(str(base)) + [in_path, out_path]
         _run_rubberband(cmd, progress_callback)
         out, sr = sf.read(out_path, dtype="float32", always_2d=True)
         if sr != sample_rate:
@@ -201,23 +219,41 @@ def make_transition_buffer(
     progress_callback: Callable[[float], None] | None = None,
 ) -> np.ndarray:
     # 变速渲染整段来曲余量：fade 秒恒速 start_rate → restore 秒 smootherstep 回 1.0 → 1.0 到结尾
+    # I0.5：空输入/空 timemap 防御（CUE 越过曲尾时 cue 切片为空 → 原 timemap[-1]
+    # IndexError 晦涩崩溃；改抛可读错误由 TransitionManager 回调 on_done(None, exc)）
+    if audio.ndim != 2 or audio.shape[1] != 2 or audio.shape[0] <= 0:
+        raise ValueError(f"变速渲染需要非空立体声输入，got shape {audio.shape}")
     fade_samples = int(round(fade_seconds * sample_rate))
     restore_samples = int(round(restore_seconds * sample_rate))
 
     timemap = _build_timemap(len(audio), start_rate, fade_samples, restore_samples)
+    if not timemap:
+        raise ValueError(
+            "变速渲染 timemap 为空（输入过短或 CUE 越过曲尾），无法构建拉伸计划"
+        )
     total_output_samples = timemap[-1][1]
     total_duration_s = total_output_samples / sample_rate
 
     def _args(tmpdir: str) -> list[str]:
-        # 写 timemap 文件并返回 -M/-D 参数（-3=R3；-M=timemap（-T 是恒速，勿混）；
-        # -D=输出总时长（必配，否则不拉伸））
-        map_path = os.path.join(tmpdir, "timemap.txt")
-        with open(map_path, "w") as f:
-            for in_f, out_f in timemap:
-                f.write(f"{in_f} {out_f}\n")
-        return ["--centre-focus", "-M", map_path, "-D", f"{total_duration_s:.6f}"]
+        # 返回 -M/-D 参数（-3=R3；-M=timemap（-T 是恒速，勿混）；-D=输出总时长
+        # （必配，否则不拉伸））；timemap 文件由 _render_via_cli 统一写入本目录
+        return [
+            "--centre-focus",
+            "-M",
+            str(Path(tmpdir) / "timemap.txt"),
+            "-D",
+            f"{total_duration_s:.6f}",
+        ]
 
-    return _render_via_cli(audio, sample_rate, _args, "mrautodj_rb_", progress_callback)
+    timemap_text = "\n".join(f"{in_f} {out_f}" for in_f, out_f in timemap) + "\n"
+    return _render_via_cli(
+        audio,
+        sample_rate,
+        _args,
+        "mrautodj_rb_",
+        progress_callback,
+        aux_files={"timemap.txt": timemap_text},
+    )
 
 
 def make_keylock_buffer(

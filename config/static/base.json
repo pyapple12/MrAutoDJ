@@ -1,5 +1,5 @@
 {
-  "version": "ver 0.24",
+  "version": "ver 0.25",
   "window_width": 1280,
   "window_height": 800,
   "sample_rate": 44100,
@@ -37,5 +37,6 @@
   "log_backup_count": 5,
   "cache_path": "cache/analysis.sqlite",
   "user_config_path": "config/user_config.json",
-  "default_theme": "dark"
+  "default_theme": "dark",
+  "themes": ["light", "dark"]
 }

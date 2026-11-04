@@ -50,10 +50,13 @@ def _build_qss(colors: dict) -> str:
     """
 
 
-def apply_theme(app: QApplication, theme: str = "dark") -> None:
-    # 应用主题 QSS 到应用（颜色来自 ui.json；浅色主题暂未实现，深色为默认）
+def apply_theme(app: QApplication, theme: str | None = None) -> None:
+    # 应用主题 QSS 到应用（颜色来自 ui.json；默认主题读 base.json default_theme，
+    # I3.4：原签名硬编码 "dark" 与配置脱钩；浅色主题预留 M1.7 批次 2 实现）
+    if theme is None:
+        theme = str(_SC.base.get("default_theme", "dark"))
     if theme != "dark":
-        # 浅色主题预留：M1 仅深色（ui.json default_theme=dark）
+        # 浅色主题预留：M1 仅深色（base.json default_theme=dark）
         pass
     app.setStyleSheet(_build_qss(_SC.ui.get("colors", {})))
 
@@ -62,7 +65,9 @@ def apply_theme(app: QApplication, theme: str = "dark") -> None:
 # 函数：
 #   _build_qss(colors)：由颜色表生成深色 QSS 字符串（背景/前景/强调色/通用控件；
 #     H2.3 起控件底色/边框全部引用 ui.json token：panel_inset/panel_edge/panel_base）
-#   apply_theme(app, theme)：应用主题（M1 仅深色；颜色来自 config/static/ui.json）
+#   apply_theme(app, theme)：应用主题（M1 仅深色；默认主题读 base.json
+#     default_theme，颜色来自 config/static/ui.json）
 # 设计理由：颜色全部 token 化（AGENTS.md 参数约定，ui.json 为唯一来源）；
 #   QSS 模板化便于后续浅色主题扩展
-# 关联配置：config/static/ui.json（colors.* + panel_inset/panel_edge/panel_base）
+# 关联配置：config/static/ui.json（colors.* + panel_inset/panel_edge/panel_base）；
+#   config/static/base.json（default_theme，I3.4 补录）

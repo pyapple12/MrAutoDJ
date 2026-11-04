@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from config.static.static_config import get_static_config
+from modules.engine import SLOT_COUNT
 from ui.widgets.glow_button import GlowButton
 
 # 静态配置解包（Pad 五模式色）
@@ -28,14 +29,15 @@ class PadWidget(QWidget):
     mode_changed = Signal(str)
 
     def __init__(self, parent=None):
-        # 初始化：8 个可勾选 GlowButton + 5 个模式键（五模式色）
+        # 初始化：SLOT_COUNT 个 GlowButton + 5 个模式键（五模式色；I2.2 槽位随
+        # base.json slot_count 配置，原字面量 8 与配置漂移）
         super().__init__(parent)
         self._mode = "Hot Cue"
         self._pad_buttons = []
 
         pads = QGridLayout()
         pads.setSpacing(4)
-        for i in range(8):
+        for i in range(SLOT_COUNT):
             btn = GlowButton(f"P{i + 1}")
             # G0.5：pad 不使用勾选态（点按辉光由 isDown 驱动，业务灯态由
             # set_pad_light→set_led 驱动，防 isChecked 残留导致灯阵失真）
@@ -66,8 +68,9 @@ class PadWidget(QWidget):
     # --- 模式 ---
 
     def _apply_mode_color(self) -> None:
-        # 模式色同步：当前模式键亮起（pad 灯色由 set_pad_light 按模式色控制）
-        color = _PAD_COLORS[PAD_MODES.index(self._mode) % len(_PAD_COLORS)]
+        # 模式色同步：当前模式键亮起（I1.3：取色统一走 mode_color()，原两处
+        # 相同表达式重复；pad 灯色由 set_pad_light 按模式色控制）
+        color = self.mode_color()
         for name, btn in self._mode_buttons.items():
             btn.set_led(name == self._mode, color if name == self._mode else None)
 
@@ -93,17 +96,13 @@ class PadWidget(QWidget):
 
     def set_pad_light(self, idx: int, on: bool) -> None:
         # 设置 pad 灯态（GlowButton LED + 模式色；越界忽略）
-        if 0 <= idx < 8:
+        if 0 <= idx < SLOT_COUNT:
             self._pad_buttons[idx].set_led(on, self.mode_color())
 
     def clear_pad_lights(self) -> None:
         # 清空全部 pad 灯（模式切换时调用）
         for btn in self._pad_buttons:
             btn.set_led(False)
-
-    def pad_light(self, idx: int) -> bool:
-        # 查询 pad 灯态（引擎状态同步用）
-        return 0 <= idx < 8 and self._pad_buttons[idx].led_on()
 
 
 # ===== ui/pad_widget.py 模块说明 =====
@@ -118,8 +117,10 @@ class PadWidget(QWidget):
 # 方法：
 #   _apply_mode_color()：模式键 LED + pad 灯色跟随模式色
 #   _select_mode(mode)：互斥切换 + 清灯 + 发信号
-#   set_pad_light/clear_pad_lights/pad_light：灯态管理（E2.7 LED 联动）
+#   set_pad_light/clear_pad_lights：灯态管理（E2.7 LED 联动；I3.2 删除零调用 pad_light）
 #   mode_color()：当前模式色（pad 灯态默认色）
 # 设计理由：组件零引擎依赖（信号解耦，MainWindow 接线）；
 #   F6.2 换 GlowButton（背光硬件感 + 五模式色灯阵，对齐 FLX4 彩色 Pad）
-# 关联配置：config/static/ui.json（pad_colors）
+#   （I2.2 例外：槽位数引用 engine.SLOT_COUNT 单源，避免与引擎配置漂移）
+# 关联配置：config/static/ui.json（pad_colors）；
+#   config/static/base.json（slot_count，经 engine.SLOT_COUNT）

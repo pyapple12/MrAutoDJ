@@ -8,10 +8,16 @@ from typing import Any
 from config.static.static_config import get_static_config
 from utils.file_utils import get_project_root, read_json, write_json
 
-# 静态配置解包（AGENTS.md：参数外置 base.json，用户配置路径由 json 指定）
+# 静态配置解包（AGENTS.md：参数外置 base.json，用户配置路径由 json 指定；
+# I2.4：直接索引改 .get() 兜底，缺键不 KeyError——本模块为规划中预留，配置裁剪不应崩）
 _SC = get_static_config()
-CONFIG_FILE = get_project_root() / Path(str(_SC.base["user_config_path"]))
-DEFAULT_THEME = str(_SC.base["default_theme"])
+CONFIG_FILE = get_project_root() / Path(
+    str(_SC.base.get("user_config_path", "config/user_config.json"))
+)
+DEFAULT_THEME = str(_SC.base.get("default_theme", "dark"))
+# 主题白名单从配置派生（I2.4：原 ("light","dark") 字面量与 base.json 漂移；
+# 兜底恒含 DEFAULT_THEME，配置缺 themes 键也不致全拒）
+_THEMES = tuple(_SC.base.get("themes", ["light", "dark"])) or (DEFAULT_THEME,)
 
 
 @dataclass
@@ -36,7 +42,7 @@ class AppConfig:
         if isinstance(geometry, str) and geometry:
             config.window_geometry = geometry
         theme = raw.get("theme")
-        if theme in ("light", "dark"):
+        if theme in _THEMES:
             config.theme = theme
         return config
 
@@ -57,8 +63,10 @@ def save_config(config: AppConfig) -> None:
 # ===== config/settings.py 模块说明 =====
 # 模块级常量：
 #   CONFIG_FILE：用户配置路径（项目内 config/user_config.json，
-#     get_project_root() 拼接，路径由 base.json user_config_path 指定）
-#   DEFAULT_THEME：默认主题从静态配置现取（零硬编码）
+#     get_project_root() 拼接，路径由 base.json user_config_path 指定；
+#     I2.4 起 .get() 兜底，缺键回落默认路径不 KeyError）
+#   DEFAULT_THEME：默认主题从静态配置现取（零硬编码，.get 兜底 "dark"）
+#   _THEMES：主题白名单（I2.4 从 base.json themes 派生，兜底 ("light","dark")）
 # 类型：
 #   AppConfig：配置聚合 dataclass（window_geometry/theme）
 #     ——window_geometry 存 QByteArray.toHex 字符串，避免 config 层依赖 PyQt
@@ -69,5 +77,5 @@ def save_config(config: AppConfig) -> None:
 # 设计理由：配置聚合用 dataclass（AGENTS.md 约定）；失败永不崩溃
 #   （AGENTS.md 错误策略：宽容解析）
 # 异常处理：读写异常全部由 file_utils 宽容消化
-# 关联配置：config/static/base.json（user_config_path/default_theme）
+# 关联配置：config/static/base.json（user_config_path/default_theme/themes）
 

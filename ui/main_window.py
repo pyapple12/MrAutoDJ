@@ -24,7 +24,8 @@ from PySide6.QtWidgets import (
 
 from config.static.static_config import get_static_config
 from modules import analyzer as analyzer_mod
-from modules.engine import AudioEngine, SLOT_COUNT
+from modules.engine import AudioEngine, SLOT_COUNT, State
+from modules.stretcher import rubberband_available
 from modules.transition import tempo_compatible
 from modules.transition_manager import DEFAULT_FADE_SECONDS, TransitionManager
 from ui.beat_fx_widget import BEAT_LADDER, BeatFxWidget
@@ -46,9 +47,15 @@ _UI = _SC.ui  # 静态配置解包（窗口尺寸/配色 token）
 _logger = get_logger(__name__)
 
 
-def _on_analysis_result(window, path: str, record, error) -> None:
+def _on_analysis_result(window, path: str, record, error, epoch: int = -1) -> None:
     # 分析 worker 回调（H3.2：原 load_library 内嵌套闭包提升为模块级函数）：
     # 经 Qt 信号回主线程回填（错误曲目降级空记录）
+    # I3.6 防御：窗口已关闭 → C++ 对象已删，emit 崩溃（静默丢弃）；
+    # epoch 与当前曲库代次不一致 → 换文件夹后的旧 worker 结果（不回填混库）
+    if getattr(window, "_closing", False):
+        return
+    if epoch >= 0 and epoch != window._library_epoch:
+        return
     if error is not None:
         _logger.warning("分析失败 %s: %s", path, error)
     window.analysis_ready.emit(path, record or analyzer_mod.empty_record())
@@ -73,6 +80,10 @@ class MainWindow(QMainWindow):
         # 每盘元数据：{path, bpm, key, downbeats}
         self._deck_meta = {"a": {}, "b": {}}
         self._library: list = []  # [{path, bpm, key, energy, record}]
+        # 曲库代次（I3.6：换文件夹 +1，旧分析线程结果按 epoch 丢弃防混库）
+        self._library_epoch = 0
+        # 关闭标记（I3.6：closeEvent 置位，分析 worker 回调前检查防 emit 已删对象）
+        self._closing = False
         # --- E2 状态 ---
         self._shift = ShiftState(self)
         # Instant Doubles：上次加载 (path, time)；500ms 内同路径再次加载 → 复制到另一盘
@@ -109,8 +120,8 @@ class MainWindow(QMainWindow):
     # --- UI 构建 ---
 
     def _build_ui(self) -> None:
-        # 构建控件树：FLX4 四区布局（F6 重构）——
-        # Browse 顶部条 + 主体四列：曲库 | Deck A | Mixer | Deck B | Effects
+        # 构建控件树：FLX4 布局（F6 重构，I3.4 注释失实修正）——
+        # Browse 顶部条 + 五列视图：曲库 | 主区四列（Deck A | Mixer | Deck B | Effects）
         # 每区 PanelFrame 深色面板包裹（对齐参考图）
         central = QWidget()
         root = QVBoxLayout(central)
@@ -274,7 +285,7 @@ class MainWindow(QMainWindow):
             col = QVBoxLayout()
             label = letter.upper()
             col.addWidget(QLabel(f"{label} VU"))
-            meter = LedStrip(segments=12)
+            meter = LedStrip()  # I2.3：段数走 ui.json led_segments（原显式 12 双处）
             setattr(self, f"_vu_{letter}", meter)
             col.addWidget(meter)
             fs = GlowButton(f"{label} FaderStart")
@@ -430,9 +441,12 @@ class MainWindow(QMainWindow):
 
         self._status(f"分析中 {len(files)} 首...")
 
+        # I3.6：代次+1 并随线程携带——连续换文件夹时旧 worker 结果过期丢弃
+        self._library_epoch += 1
+        epoch = self._library_epoch
         threading.Thread(
             target=analyzer_mod.analyze_many,
-            args=(files, lambda p, r, e: _on_analysis_result(self, p, r, e)),
+            args=(files, lambda p, r, e: _on_analysis_result(self, p, r, e, epoch)),
             kwargs={"with_cues": False},
             daemon=True,
         ).start()
@@ -571,15 +585,13 @@ class MainWindow(QMainWindow):
         self._status(f"CUE 已设置并回到 {deck.cue_seconds:.1f}s")
 
     def _on_beatloop(self, deck, beats: int) -> None:
-        # Beatloop：按当前盘 BPM 设置拍循环（无 BPM 忽略）
-        bpm = (
-            self._deck_meta["a"].get("bpm")
-            if deck is self._engine.deck_a
-            else self._deck_meta["b"].get("bpm")
-        )
-        if bpm and bpm > 0:
+        # Beatloop：按当前盘 BPM 设置拍循环（I1.1：BPM 统一读公开 deck.bpm property）
+        bpm = deck.bpm
+        if bpm > 0:
             deck.set_beatloop(beats, bpm)
             self._status(f"Beatloop {beats} 拍")
+        else:
+            self._status("当前盘 BPM 未知，无法 Beatloop")
 
     def _on_keylock(self, deck, on: bool) -> None:
         # Keylock 开关（占位：M1 预渲染管线接入点在转场；此处仅提示）
@@ -593,6 +605,9 @@ class MainWindow(QMainWindow):
 
     def _on_prepare(self) -> None:
         # Prepare：以目标盘为 now，表格选中行为来曲，走 TransitionManager
+        # I3.1：rubberband 前置探测（缺失只提示不阻断——SKIP 直混转场仍可用）
+        if not rubberband_available():
+            self._status("⚠ rubberband 未找到：变速转场不可用，仅支持 SKIP 直混")
         row = self._table.currentRow()
         if row < 0:
             self._status("请先选中来曲")
@@ -673,11 +688,11 @@ class MainWindow(QMainWindow):
             else:
                 deck.hot_cue_set(idx)
         elif mode == "Beat Loop":
-            beats = BEAT_LADDER[idx % len(BEAT_LADDER)]
             if shift:
                 deck.set_loop(False)
             else:
-                deck.set_beatloop(beats, deck._bpm or 120.0)
+                # I1.1：走 _on_beatloop 统一入口（公开 bpm property + BPM 未知提示）
+                self._on_beatloop(deck, BEAT_LADDER[idx % len(BEAT_LADDER)])
         elif mode == "Beat Jump":
             step = [1, 2, 4, 8][idx % 4]
             direction = -1 if idx < 4 else 1
@@ -691,7 +706,11 @@ class MainWindow(QMainWindow):
                 self._status(f"采样槽 {idx + 1} 未载入")
         elif mode == "Key Shift":
             # FLX4 语义：Pad1/8 均为复位键（0 半音）→ 未移调时两灯同亮为预期行为
-            semitones = [0, 1, 2, 3, -3, -2, -1, 0][idx]
+            # （I2.2：slot_count 可配，半音表固定 8 项，越界槽位忽略）
+            semitone_table = [0, 1, 2, 3, -3, -2, -1, 0]
+            if idx >= len(semitone_table):
+                return
+            semitones = semitone_table[idx]
             if shift:
                 deck.set_key_shift(deck.key_shift + semitones if semitones else 0)
             else:
@@ -700,7 +719,7 @@ class MainWindow(QMainWindow):
     def _apply_beat_fx(self) -> None:
         # 按面板当前状态应用 Beat FX 到目标盘（效果/深度/开关任一变化时统一调用）
         deck = getattr(self._engine, f"deck_{self._target}")
-        on = self._beat_fx._onoff.isChecked()
+        on = self._beat_fx.is_on()  # I1.2：公开接口读取开关状态（不再跨控件访问私有字段）
         if on and self._beat_fx_effect:
             deck.set_fx(self._beat_fx_effect, self._beat_fx_depth)
         else:
@@ -743,7 +762,9 @@ class MainWindow(QMainWindow):
         for letter, widget in (("a", self.deck_widget_a), ("b", self.deck_widget_b)):
             deck = getattr(self._engine, f"deck_{letter}")
             widget.update_progress(deck.position, deck.duration)
-            playing = deck.state.value == "playing" and not deck.paused
+            # I0.4：MIXING 也计入播放中（原只判 "playing"，Mix Now 后 16s
+            # 淡化期间播放键文案/灯态失实且点击行为错位）
+            playing = deck.state in (State.PLAYING, State.MIXING) and not deck.paused
             widget.set_playing_state(playing)
             # Jog 中心屏（F6.3）：BPM + 位置
             jog = self.jog_a if letter == "a" else self.jog_b
@@ -795,7 +816,9 @@ class MainWindow(QMainWindow):
         _logger.info("%s", msg)
 
     def closeEvent(self, event) -> None:
-        # 关闭：停止定时器并关闭引擎流（异常捕获不崩溃）
+        # 关闭：置关闭标记（分析 worker 回调前检查，I3.6 防 emit 已删对象崩溃）、
+        # 停止定时器并关闭引擎流（异常捕获不崩溃）
+        self._closing = True
         self._timer.stop()
         try:
             self._engine.close()

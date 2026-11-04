@@ -33,10 +33,20 @@ class GlowButton(QAbstractButton):
 
     def set_led(self, on: bool, color: QColor | str | None = None) -> None:
         # 设置 LED 灯态（on + 可选颜色；空=保持当前色）
+        # I3.5：状态未变化不重绘（_tick 100ms × 十余控件高频调用，原无条件
+        # update 造成 ~180 次/秒无效全量重绘）
+        changed = False
         if color is not None:
-            self._led_color = QColor(color)
-        self._led_on = bool(on)
-        self.update()
+            c = QColor(color)
+            if c != self._led_color:
+                self._led_color = c
+                changed = True
+        on = bool(on)
+        if on != self._led_on:
+            self._led_on = on
+            changed = True
+        if changed:
+            self.update()
 
     def led_on(self) -> bool:
         # LED 灯态查询（Pad/模式键灯阵用）

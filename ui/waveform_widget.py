@@ -10,9 +10,10 @@ from PySide6.QtWidgets import QWidget
 
 from config.static.static_config import get_static_config
 
-# 静态配置解包（波形颜色）
+# 静态配置解包（波形颜色；I3.5：变量名 _SC.ui → _UI 与其余 UI 模块统一）
 _SC = get_static_config()
-_UI_COLORS = _SC.ui.get("colors", {})
+_UI = _SC.ui
+_UI_COLORS = _UI.get("colors", {})
 
 
 def _build_peaks(audio: np.ndarray, width: int) -> np.ndarray:
@@ -96,8 +97,8 @@ class WaveformWidget(QWidget):
 # 模块级常量：
 #   _SC / _UI_COLORS：静态配置（波形颜色，AGENTS.md 参数约定）
 # 函数：
-#   _build_peaks(audio, width)：双通道均值 → 每像素列 [min,max]（O(width) 峰值缓存，
-#     避免每帧全量扫描；短音频线性重采样）
+#   _build_peaks(audio, width)：mono 直用 / 双通道均值（H0.3 支持 1D 输入）→
+#     每像素列 [min,max]（O(width) 峰值缓存，避免每帧全量扫描；短音频线性重采样）
 # 类型：
 #   WaveformWidget(QWidget)：波形显示（set_audio/set_position/paintEvent）
 # 设计理由：峰值缓存一次计算、绘制只扫描缓存（实时线程零依赖）；

@@ -256,3 +256,48 @@
 - [x] H4.2 GUI 实测（2026-08-13 用户确认）—— H0 修复项复核（EQ 旋钮/进度显示/加载/分析）界面正常
 - [x] H4.3 文档同步（2026-08-13）—— z.plan.md 附录 A002 标注已修（P0-P3 ✅）、x.progress.md H 系列全部勾选、README 徽章 ver 0.24、base.json ver 0.24
 - [x] H4.4 提交 V0.24（由用户执行，Git 拆分用户决定）
+
+## I. 第三轮审计修复任务清单（依据 z.plan.md 附录 A003：全量代码审计报告（第三轮，2026-08-13））
+
+> 规划：2026-08-13 生成（作为次日修复任务）。按 I0→I4 顺序执行；每项修复后跑对应检验确认通过才算完成；多模态节点：涉及截图核对时停下通知切换。
+> 做法说明：—— 做法 为执行要点（含简单修复方案）。
+> 执行：2026-11-05 完成 I0-I4（I4.2/I4.4 待用户）；I0.5/I2.6 为 A003 表列明但原清单遗漏的补录项。
+
+### I0. P0 正确性修复（4 项 + 补录 1 项）
+
+- [x] I0.1 analyzer hop NameError（P1 回归，2026-11-05）—— analyzer.py `_detect_cues` hop_length=hop 引用已删局部变量 → CLI 批量分析崩溃；改 hop_length=ANALYSIS_HOP；验证：probe_i0 源码断言 + 9s 合成音频 _detect_cues 功能不崩（NameError 消除）
+- [x] I0.2 _fill_resample step==0（2026-11-05）—— engine 正向搜索 |rate|<0.000244 时 step==0 → 空数组负索引 IndexError 静音卡死；搜索/弯音两调用点均 step = max(1, int(round(...)))；验证：probe_i0 jog_search(±0.0001) fill 不崩且输出非静音（曲头反向静音为正确语义，探针先 seek 离开曲头）
+- [x] I0.3 Censor 曲头反向清除（2026-11-05）—— engine `_fill_playing` 反向分支删 _reverse=False 置位，到曲头钳 0 保持反向停留（仅 censor(False) 恢复）；验证：probe_i0 按住 10 块越过曲头 _reverse 仍 True + 释放恢复正向推进
+- [x] I0.4 MIXING 播放键 UI 失实（2026-11-05）—— main_window 导入 State，_tick 播放判定改 `deck.state in (State.PLAYING, State.MIXING)`；验证：probe_i0 假引擎 MainWindow：MIXING 态 _tick 后播放键"暂停"、IDLE 态"播放"
+- [x] I0.5 空 cue 切片 timemap[-1] IndexError（2026-11-05 补录，A003 P2 表列明但原清单遗漏；A003 标注 transition_manager.py:208 系笔误，实际在 stretcher.py）—— make_transition_buffer 入口加非空立体声校验 + timemap 空校验，抛可读 ValueError 由 on_done(None, exc) 上报不崩溃；验证：probe_i0 空输入断言
+
+### I1. P1 去重（3 项）
+
+- [x] I1.1 双 BPM 路径统一（2026-11-05）—— Deck 加公开 `bpm` property（读锁内 _bpm）；_on_beatloop 与 Pad Beat Loop 统一走 _on_beatloop（deck.bpm 驱动，BPM 未知状态栏提示，删除 or 120.0 静默假设）；验证：probe_i1 property/钳制/双入口行为一致 + main_window 无 deck._bpm 直读
+- [x] I1.2 BeatFxWidget 公开接口（2026-11-05）—— 新增 is_on()；_apply_beat_fx 改公开调用；验证：probe_i1 开关两态断言 + 源码无 _onoff 跨控件私有访问
+- [x] I1.3 _apply_mode_color 重复表达式（2026-11-05）—— 改调 self.mode_color()；验证：probe_i1 源码断言 + 模式切换灯色行为等价
+
+### I2. P2 配置化（5 项 + 补录 1 项）
+
+- [x] I2.1 配置键层级修复（2026-11-05）—— led_strip/mini_display 顶层读 warning/danger/accent 改 _UI["colors"] 子对象（对齐 themes.py 路径，改配置即生效）+ 说明区补层级；验证：probe_i2 取值与 ui.json colors 一致
+- [x] I2.2 pad 硬编码 8 → SLOT_COUNT（2026-11-05）—— pad_widget 三处字面量改引用 engine.SLOT_COUNT（槽位单源）；main_window Key Shift 半音表加越界防护（表长固定 8）；验证：probe_i2 pad 键数=SLOT_COUNT + 越界灯态忽略
+- [x] I2.3 LedStrip 段数进配置（2026-11-05）—— ui.json 加 `led_segments: 12`；_SEGMENTS 读配置，main_window 显式 12 删除；验证：probe_i2 双处一致
+- [x] I2.4 settings 配置防御（2026-11-05）—— user_config_path/default_theme 改 .get() 兜底；主题白名单改 base.json `themes` 派生（新增键 ["light","dark"]，兜底恒含 DEFAULT_THEME）；验证：probe_i2 白名单一致 + 非法主题回默认
+- [x] I2.5 配置缺键防御（2026-11-05）—— analyzer CUE_PARAMS 三键/engine ECHO_PRESET/DELAY_PRESET 直接索引改 .get(key, 默认)；验证：probe_i2 清空配置后 _detect_cues/Echo/Delay 不崩
+- [x] I2.6 convert to_float 拦截 nan/inf（2026-11-05 补录，A003 P3 遗留项）—— math.isfinite 兜底，坏数据回 default 不污染 BPM/能量下游计算；验证：probe_i2 nan/inf/nan 字符串全断言
+
+### I3. P3 清理（6 组）
+
+- [x] I3.1 rubberband 前置检查（2026-11-05）—— `_render_via_cli` 缺可执行文件抛可读 RuntimeError（原 [None,...] 进 subprocess 报晦涩 TypeError）；main_window._on_prepare 前置探测提示（不阻断——SKIP 直混转场不受影响）；验证：probe_i3 mock 缺失断言报错信息
+- [x] I3.2 死代码清理（2026-11-05）—— pad_light() 零调用删除；jog_wheel QLabel 死导入删除；transition_manager numpy 转 TYPE_CHECKING 守卫（注解仍可查）；engine 恒 False 分支删除（与 I0.2 合并执行）；beat_fx 四死信号（CH/AUTO/TAP/bpm）标注"预留未接线（M1.7 批次 1 启用）"控件保留；验证：probe_i3 源码断言
+- [x] I3.3 函数内 import 残留（2026-11-05）—— analyzer `_warm_worker` import tempfile 上移顶层（librosa 重依赖按约定豁免）；验证：probe_i3 源码断言无函数内 import（librosa 除外）
+- [x] I3.4 注释/文档失实批量（2026-11-05）—— H0.2 注释"原子替换"改"缩短混配窗口"（如实）；等功率换算两处失实说法删除；deck_widget/waveform/themes 说明区补齐（glow_orange/sample_rate/1D/base.json）；themes.apply_theme 默认主题改读 base.json（签名 None）；main_window 布局注释改五列视图；README 补 audio_decode/x.progress 描述/拟物五列标题；验证：probe_i3 断言
+- [x] I3.5 性能与细节（2026-11-05）—— glow_button set_led 状态未变不重绘（去 ~180 次/秒无效重绘）；set_fx 复用 Biquad 实例换系数 + keep_zi 保留延迟状态（防深度扫动咔嗒）+ Biquad.bypass()；mini_display elide 先 setFont 再度量（修 H3.5 引入的度量错位）；waveform _SC.ui→_UI 统一；_fill_resample 死分支删除（同 I3.2 恒 False 分支）；验证：probe_i3 重绘计数/实例复用/zi 保留/绘制顺序断言；深度扫动听感留 GUI 实测
+- [x] I3.6 分析 worker 防御（2026-11-05）—— closeEvent 置 _closing flag、回调前检查（防关窗后 emit 已删 C++ 对象崩溃）；load_library 代次 _library_epoch +1 随线程携带、回调 epoch 不一致丢弃（防换文件夹混库）；验证：probe_i3 关窗/过期/当前 epoch 三态断言
+
+### I4. 验证与收尾
+
+- [x] I4.1 全量回归（2026-11-05）—— **17/17 probe PASS**（p1/p2/p3/p5/p6/g0/g1/g2/g3/h0/h1/h2/h3 + i0/i1/i2/i3）+ 冒烟 import 全模块 OK + GUI 无头初始化 OK + layout_i.png（1650×800）定稿；**多模态读图核对完成**（2026-11-05）：layout_i.png 与 layout_h.png 逐项一致（五列布局/面板/控件/配色零回退）；layout_i_loaded.png 加载态核对（波形渲染+播放头/播放键橙色辉光/Jog 播放指示点/VU 分带点亮）
+- [x] I4.2 GUI 实测（2026-11-05，AI 执行 + 用户授权）—— ① CLI 真机分析：`-m modules.analyzer --folder .temp/test_audio` 完整跑通 9/9（I0.1 修复在真实 CLI 路径生效），broken.wav 可读报错降级不中断；② 真实引擎静音端到端（probe_i4_gui，主音量 0）：解码 (N,2)/播放推进/Censor 曲头保持反向/start_mix→MIXING→PLAYING/FX 深度扫动复用实例不崩/VU 采集；③ 加载态截图读图核对（见 I4.1）。注：FX 咔嗒消除的主观听感建议日常使用中复核
+- [x] I4.3 文档同步（2026-11-05）—— z.plan A003 标注已修 + 补录项说明、x.progress I 系列勾选、README 修正（I3.4 同步）、版本号 ver 0.25（base.json + README 徽章）
+- [x] I4.4 提交 V0.25（2026-11-05，用户授权 AI 执行；w.study.md 预存改动未纳入，另行处理）

@@ -5,14 +5,15 @@
 from __future__ import annotations
 
 import threading
-from typing import Callable
-
-import numpy as np
+from typing import TYPE_CHECKING, Callable
 
 from config.static.static_config import get_static_config
 from modules.engine import KEY_SHIFT_MAX, SAMPLE_RATE, State
 from modules.stretcher import make_keylock_buffer, make_transition_buffer
 from modules.transition import TransitionPlan, plan_transition
+
+if TYPE_CHECKING:
+    import numpy as np  # 仅注解用（I3.2：运行时零使用，TYPE_CHECKING 守卫）
 
 # 静态配置解包（对齐点余量：下拍触发前的最短提前量，秒）
 _SC = get_static_config()

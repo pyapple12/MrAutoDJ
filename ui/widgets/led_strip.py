@@ -9,16 +9,17 @@ from PySide6.QtWidgets import QWidget
 
 from config.static.static_config import get_static_config
 
-# 静态配置解包（LED 配色与分带阈值）
+# 静态配置解包（LED 配色与分带阈值；warning/danger 在 colors 子对象内，I2.1 修正层级）
 _SC = get_static_config()
 _UI = _SC.ui
+_UI_COLORS = _UI.get("colors", {})
 _PANEL_INSET = QColor(_UI.get("panel_inset", "#101215"))
 _GREEN = QColor(_UI.get("glow_green", "#2fe37a"))
-_YELLOW = QColor(_UI.get("warning", "#ffcc00"))
-_RED = QColor(_UI.get("danger", "#ff4444"))
+_YELLOW = QColor(_UI_COLORS.get("warning", "#ffcc00"))
+_RED = QColor(_UI_COLORS.get("danger", "#ff4444"))
 _GREEN_TH = float(_UI.get("led_green_threshold", 0.6))  # 0-60% 绿
 _YELLOW_TH = float(_UI.get("led_yellow_threshold", 0.85))  # 60-85% 黄，以上红
-_SEGMENTS = 12  # 默认分段数
+_SEGMENTS = int(_UI.get("led_segments", 12))  # 默认分段数（I2.3：进配置）
 
 
 class LedStrip(QWidget):
@@ -88,5 +89,6 @@ class LedStrip(QWidget):
 #   set_level(0..1)：亮起段数 = level×segments；_segment_color 按位置分带
 #   绘制：垂直从底部起亮（水平从左），段间留缝模拟 LED 颗粒
 # 设计理由：分段灯柱比连续渐变更像硬件 VU（M1.6 规格单）；
-#   分带阈值/段数参数化（ui.json led_green_threshold/led_yellow_threshold）
-# 关联配置：config/static/ui.json（glow_green/warning/danger/panel_inset）
+#   分带阈值/段数参数化（ui.json led_green_threshold/led_yellow_threshold/led_segments）
+# 关联配置：config/static/ui.json（colors.warning/colors.danger 为 colors 子对象键，
+#   I2.1 修正读取层级；glow_green/panel_inset 顶层键；led_segments 段数）

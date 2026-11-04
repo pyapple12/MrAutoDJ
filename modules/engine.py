@@ -76,15 +76,18 @@ class Biquad:
         self._a: np.ndarray | None = None
         self._zi: np.ndarray | None = None
 
-    def _set_coeffs(self, b: np.ndarray, a: np.ndarray) -> None:
-        # 更新系数（按 a[0] 归一化；旁通 None 时保持旧 zi；新系数从静止开始防咔嗒）
+    def _set_coeffs(self, b: np.ndarray, a: np.ndarray, keep_zi: bool = False) -> None:
+        # 更新系数（按 a[0] 归一化；新系数默认 zi 归零防咔嗒；keep_zi=True 时保留
+        # 延迟状态——I3.5：HPF/LPF 深度扫动复用 zi 防每次从静止开始的爆点）
         if b is None:
             self._b, self._a = None, None
             return
         a0 = a[0]
-        # H0.2：单条元组赋值保证 _b/_a 原子替换（原两行赋值回调可能读到新旧混配）
+        # H0.2：单条元组赋值缩短新旧系数混配窗口（RHS 先整体求值，比两行赋值
+        # 混配概率低；GIL 字节码间仍可能切换，彻底原子需指针交换，收益不匹配）
         self._b, self._a = b / a0, a / a0
-        self._zi = np.zeros((2, 2), dtype=np.float64)
+        if not keep_zi or self._zi is None:
+            self._zi = np.zeros((2, 2), dtype=np.float64)
 
     def low_shelf(self, gain_db: float, freq: float, q: float = 0.707) -> None:
         # 低频架：增益 -30..+6dB（RBJ 公式），旋钮低段用
@@ -144,26 +147,32 @@ class Biquad:
         a = np.array([1.0 + alpha / A, -2.0 * cos_w0, 1.0 - alpha / A])
         self._set_coeffs(b, a)
 
-    def highpass(self, cutoff: float, q: float = 0.707) -> None:
-        # 高通滤波（RBJ 直接型；Beat FX HPF 用）
+    def highpass(self, cutoff: float, q: float = 0.707, keep_zi: bool = False) -> None:
+        # 高通滤波（RBJ 直接型；Beat FX HPF 用；keep_zi 语义见 _set_coeffs）
         w0 = 2.0 * np.pi * cutoff / self.sr
         alpha = np.sin(w0) / (2.0 * q)
         cos_w0 = np.cos(w0)
         b = np.array([(1.0 + cos_w0) / 2.0, -(1.0 + cos_w0), (1.0 + cos_w0) / 2.0])
         a = np.array([1.0 + alpha, -2.0 * cos_w0, 1.0 - alpha])
-        self._set_coeffs(b, a)
+        self._set_coeffs(b, a, keep_zi)
 
-    def lowpass(self, cutoff: float, q: float = 0.707) -> None:
-        # 低通滤波（RBJ 直接型；Beat FX LPF 用）
+    def lowpass(self, cutoff: float, q: float = 0.707, keep_zi: bool = False) -> None:
+        # 低通滤波（RBJ 直接型；Beat FX LPF 用；keep_zi 语义见 _set_coeffs）
         w0 = 2.0 * np.pi * cutoff / self.sr
         alpha = np.sin(w0) / (2.0 * q)
         cos_w0 = np.cos(w0)
         b = np.array([(1.0 - cos_w0) / 2.0, 1.0 - cos_w0, (1.0 - cos_w0) / 2.0])
         a = np.array([1.0 + alpha, -2.0 * cos_w0, 1.0 - alpha])
-        self._set_coeffs(b, a)
+        self._set_coeffs(b, a, keep_zi)
 
     def reset(self) -> None:
         # 清除延迟状态（换曲/重开时防滤波振铃串音）
+        self._zi = None
+
+    def bypass(self) -> None:
+        # 置旁通（系数清 None + 状态清零；I3.5：set_fx 关闭时复用实例不再新建）
+        self._b = None
+        self._a = None
         self._zi = None
 
     def process(self, x: np.ndarray) -> None:
@@ -313,11 +322,11 @@ class FeedbackDelay:
 class Echo(FeedbackDelay):
     # Echo：短延迟（250ms）+ 高反馈（0.6），经典回声（参数配置驱动 G2.1）
     def __init__(self, sr: int):
-        # 初始化反馈延迟线并配置 Echo 参数
+        # 初始化反馈延迟线并配置 Echo 参数（I2.5：缺键 .get 兜底）
         super().__init__(sr)
         self.configure(
-            ECHO_PRESET["delay"],
-            ECHO_PRESET["feedback"],
+            float(ECHO_PRESET.get("delay", 0.25)),
+            float(ECHO_PRESET.get("feedback", 0.6)),
             n_taps=int(ECHO_PRESET.get("taps", 1)),
         )
 
@@ -326,11 +335,11 @@ class Delay(FeedbackDelay):
     # Delay：长延迟（0.375s≈120BPM 八分音符）+ 中反馈（0.4）+ 3 tap
     # （参数配置驱动 G2.1）
     def __init__(self, sr: int):
-        # 初始化反馈延迟线并配置 Delay 参数
+        # 初始化反馈延迟线并配置 Delay 参数（I2.5：缺键 .get 兜底）
         super().__init__(sr)
         self.configure(
-            DELAY_PRESET["delay"],
-            DELAY_PRESET["feedback"],
+            float(DELAY_PRESET.get("delay", 0.375)),
+            float(DELAY_PRESET.get("feedback", 0.4)),
             n_taps=int(DELAY_PRESET.get("taps", 3)),
         )
 
@@ -498,6 +507,12 @@ class Deck:
         # 设置当前曲 BPM（Beat Jump/Tap 计算用；UI 加载曲目时调用）
         with self._lock:
             self._bpm = max(0.0, float(bpm))
+
+    @property
+    def bpm(self) -> float:
+        # 当前曲 BPM 公开只读（I1.1：UI 统一走此 property，替代直读 _bpm 私有字段）
+        with self._lock:
+            return self._bpm
 
     def _beat_len(self, bpm: float) -> int:
         # 拍长换算（样本数）：60/bpm×sr（G1.3：beat_jump/set_beatloop 共用）
@@ -770,12 +785,13 @@ class Deck:
                 self._fill_mixing(out[frames_before:], frames_after)
             return
 
-        # Censor：反向播放（按住期间）
+        # Censor：反向播放（按住期间）；到曲头保持反向停留（I0.3：原在此清除
+        # _reverse，按住越过曲头后永久恢复正向，与"按住期间反向"语义不符——
+        # 仅 censor(False) 释放时恢复正向）
         if self._reverse:
             self._position -= frames
             if self._position <= 0:
                 self._position = 0
-                self._reverse = False
             out[:] = self._get_chunk_reverse(frames)
             return
 
@@ -802,9 +818,10 @@ class Deck:
             return
 
         # 步长：高速搜索 > 弯音 > 原速
-        step = frames
         if self._jog_search_rate != 0.0:
-            step = int(round(frames * abs(self._jog_search_rate)))
+            # I0.2：step 钳制 ≥1（|rate|<0.000244 时原 step==0 → _fill_resample
+            # 空数组负索引 IndexError 静音卡死）
+            step = max(1, int(round(frames * abs(self._jog_search_rate))))
             if self._jog_search_rate < 0:
                 self._position = max(0, self._position - step)
                 out[:] = self._get_chunk_reverse(frames)
@@ -817,7 +834,8 @@ class Deck:
                 self.state = State.IDLE
             return
         elif self._jog_bend_rate != 0.0:
-            step = int(round(frames * (1.0 + self._jog_bend_rate)))
+            # I0.2：step 钳制 ≥1（frames=1 且 bend=-0.5 极端时 round 可为 0）
+            step = max(1, int(round(frames * (1.0 + self._jog_bend_rate))))
             self._fill_resample(out, frames, step)
             self._position += step
             # Sampler 叠加（在 EQ 前混入采样）
@@ -826,12 +844,10 @@ class Deck:
                 self.state = State.IDLE
             return
 
-        if step != frames:
-            chunk = self._get_chunk(step)
-            out[:] = chunk[:frames]
-        else:
-            out[:] = self._get_chunk(frames)
-        self._position += step
+        # I3.2：恒 False 分支删除（原 step 与 frames 的比较分支不可达——搜索/弯音
+        # 已提前返回，此处恒原速）——I3.5 的 _fill_resample 死分支同指此处
+        out[:] = self._get_chunk(frames)
+        self._position += frames
 
         # Sampler 叠加（在 EQ 前混入采样）
         self._mix_sample(out)
@@ -888,7 +904,8 @@ class Deck:
         self._position = max(0, min(int(round(self._scratch_fpos)), len(audio)))
 
     def _fill_mixing(self, out: np.ndarray, frames: int) -> None:
-        # 交叉淡化填充：逐帧线性渐变（可叠加等功率由外层调用方换算）
+        # 交叉淡化填充：逐帧线性渐变（等功率曲线作用于主输出 Crossfader，
+        # 与本函数无关——I3.4 注释失实修正）
         now_chunk = self._get_chunk(frames)
         nxt_chunk = self._get_next_chunk(frames)
 
@@ -982,24 +999,26 @@ class Deck:
             self._fx_depth = max(0.0, min(1.0, float(depth)))
             if effect == "HPF" and depth > KNOB_DEADZONE:
                 # 截止随 depth 对数升高（H2.2：范围配置驱动）
+                # I3.5：复用实例换系数 + 保留 zi（原重建 Biquad 丢状态，
+                # 深度扫动/反复开关产生咔嗒）
                 lo, hi = FX_HPF_RANGE
                 cutoff = lo * (hi / lo) ** depth
-                self._fx_filter = Biquad(self.sr)
-                self._fx_filter.highpass(cutoff)
+                self._fx_filter.highpass(cutoff, keep_zi=True)
             elif effect == "LPF" and depth > KNOB_DEADZONE:
                 lo, hi = FX_LPF_RANGE
                 cutoff = lo * (hi / lo) ** depth
-                self._fx_filter = Biquad(self.sr)
-                self._fx_filter.lowpass(cutoff)
+                self._fx_filter.lowpass(cutoff, keep_zi=True)
             else:
-                self._fx_filter = Biquad(self.sr)
+                self._fx_filter.bypass()
             if effect == "Echo":
                 base, slope = FX_ECHO_DEPTH
-                self._fx_delay.configure(ECHO_PRESET["delay"], base + slope * depth)
+                self._fx_delay.configure(
+                    float(ECHO_PRESET.get("delay", 0.25)), base + slope * depth
+                )
             elif effect == "Delay":
                 base, slope = FX_DELAY_DEPTH
                 self._fx_delay.configure(
-                    DELAY_PRESET["delay"],
+                    float(DELAY_PRESET.get("delay", 0.375)),
                     base + slope * depth,
                     n_taps=int(DELAY_PRESET.get("taps", 3)),
                 )
@@ -1356,7 +1375,7 @@ class CuePlayer:
 #     弯音/搜索经 _fill_resample 变速插值，触摸锁定经 _scratch_fill 平滑刮擦）
 #   D2.5 Deck.start_mix/_fill_mixing（样本级定时切歌 + 逐帧交叉淡化；
 #     fade 钳制 ≥1 防除零）
-#   D2.6 交叉淡化线性渐变（等功率由外层曲线换算，见 Crossfader）
+#   D2.6 交叉淡化线性渐变（等功率曲线在主输出 Crossfader，不在转场内部）
 #   D2.7 DeckEQ（RBJ 三频；系数/处理分离；zi 连续性）
 #   D2.8 Crossfader（常量功率 cos/sin）
 #   D2.9 set_volume（boost 限幅 ±1.0）

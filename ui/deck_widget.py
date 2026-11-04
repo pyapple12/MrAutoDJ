@@ -125,4 +125,5 @@ class DeckWidget(QWidget):
 #     由 _SR = base.json sample_rate 换算，M:SS 显示）
 #   set_playing_state(is_playing)：按钮文案切换
 # 设计理由：控件零引擎依赖（信号解耦，B1"UI 只发指令"）；Pitch 用整数百分比滑块
-# 关联配置：无（颜色在 waveform 内部）
+# 关联配置：config/static/ui.json（glow_orange 播放 LED 色）；
+#   config/static/base.json（sample_rate → _SR 进度换算，I3.4 补录）

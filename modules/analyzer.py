@@ -9,6 +9,7 @@ import multiprocessing
 import os
 import sqlite3
 import sys
+import tempfile
 from concurrent import futures
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -443,9 +444,10 @@ def _detect_cues(
     # 自动 CUE：MFCC+chroma 聚合聚类分段 → 边界吸附最近拍点 → 8s 去重 → 最多 8 个
     import librosa
 
-    max_cues = int(CUE_PARAMS["max_cues"])
-    min_spacing = float(CUE_PARAMS["min_spacing"])
-    n_mfcc = int(CUE_PARAMS["n_mfcc"])
+    # I2.5：缺键 .get() 兜底（cue_params 配置裁剪/半配置时不 KeyError 崩溃）
+    max_cues = int(CUE_PARAMS.get("max_cues", 8))
+    min_spacing = float(CUE_PARAMS.get("min_spacing", 8.0))
+    n_mfcc = int(CUE_PARAMS.get("n_mfcc", 13))
     duration = len(y) / sr
     if duration < 8.0:
         return []
@@ -461,7 +463,10 @@ def _detect_cues(
     n_frames = features.shape[1]
     n_segments = min(max_cues + 2, max(2, n_frames // 4))
     boundary_frames = librosa.segment.agglomerative(features, n_segments)
-    boundary_times = librosa.frames_to_time(boundary_frames, sr=sr, hop_length=hop)
+    # I0.1：hop_length 引用配置常量（原 hop 引用已删局部变量，CLI 批量分析 NameError）
+    boundary_times = librosa.frames_to_time(
+        boundary_frames, sr=sr, hop_length=ANALYSIS_HOP
+    )
 
     # 边界吸附到最近拍点；忽略尾部 5s；8s 最小间距去重
     snapped = []
@@ -675,9 +680,8 @@ def _default_workers() -> int:
 
 
 def _warm_worker() -> None:
-    # worker 初始化：隔离 numba JIT 缓存（多进程并发写共享缓存会损坏导致段错误）
-    import tempfile
-
+    # worker 初始化：隔离 numba JIT 缓存（多进程并发写共享缓存会损坏导致段错误；
+    # I3.3：tempfile 顶层导入，函数内 import 全清）
     os.environ["NUMBA_CACHE_DIR"] = tempfile.mkdtemp(prefix="mrautodj-numba-")
 
 

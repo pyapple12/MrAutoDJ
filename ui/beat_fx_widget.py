@@ -26,12 +26,12 @@ BEAT_LADDER = [1, 2, 4, 8, 16, 32]
 class BeatFxWidget(QWidget):
     # Beat FX 面板：选择/通道/拍数/深度/开关（全部原语控件）
     fx_changed = Signal(str)  # 效果类型
-    channel_changed = Signal(str)  # "1" | "2" | "both"
-    beats_changed = Signal(int)  # 拍数
+    channel_changed = Signal(str)  # "1" | "2" | "both"（预留未接线，I3.2/M1.7 批次 1 启用）
+    beats_changed = Signal(int)  # 拍数（预留未接线，I3.2/M1.7 批次 1 启用）
     depth_changed = Signal(float)  # 0-1
     onoff_changed = Signal(bool)
-    bpm_tap = Signal()
-    bpm_auto = Signal()
+    bpm_tap = Signal()  # TAP 按钮（预留未接线，I3.2/M1.7 批次 1 启用）
+    bpm_auto = Signal()  # AUTO 按钮（预留未接线，I3.2/M1.7 批次 1 启用）
 
     def __init__(self, parent=None):
         # 初始化：效果按钮组 + 通道开关 + 拍数 ± + 深度旋钮 + 开关 + BPM 模式
@@ -141,6 +141,11 @@ class BeatFxWidget(QWidget):
         self._beats = max(1, min(32, beats))
         self._beats_disp.set_text(str(self._beats))
 
+    def is_on(self) -> bool:
+        # FX ON 开关状态公开查询（I1.2：替代 MainWindow 直访 _onoff.isChecked()
+        # 私有字段，控件内部状态只经公开接口读取）
+        return self._onoff.isChecked()
+
 
 # ===== ui/beat_fx_widget.py 模块说明 =====
 # 模块级常量：
@@ -148,8 +153,9 @@ class BeatFxWidget(QWidget):
 # 类型：
 #   BeatFxWidget(QWidget)：Beat FX 面板
 # 信号：
-#   fx_changed / channel_changed / beats_changed / depth_changed / onoff_changed /
-#   bpm_tap / bpm_auto：全部信号驱动（MainWindow 接引擎）
+#   fx_changed / depth_changed / onoff_changed：已接线（MainWindow 接引擎）
+#   channel_changed / beats_changed / bpm_tap / bpm_auto：预留未接线
+#     （I3.2 标注：对应 CH/AUTO/TAP 为用户可见预留控件，M1.7 批次 1 启用）
 # 方法：
 #   _select_fx(fx)：效果互斥（LED 橙色）
 #   _select_channel(ch)：通道互斥
