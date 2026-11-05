@@ -27,6 +27,8 @@ from PySide6.QtWidgets import (
 from config.static.static_config import get_static_config
 from modules import analyzer as analyzer_mod
 from modules.engine import AudioEngine, EQ_GAIN_DB, SLOT_COUNT, State
+from modules import library as library_mod
+from modules.automix import AutomixController
 from modules.stretcher import rubberband_available
 from modules.transition import tempo_compatible
 from modules.transition_manager import DEFAULT_FADE_SECONDS, TransitionManager
@@ -86,6 +88,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._engine = engine or AudioEngine()
         self._tm = TransitionManager(self._engine)
+        # M2 自动编排桥（PL002.9：曲库/当前盘元数据经 getter 注入，late-bind）
+        self._automix = AutomixController(
+            self._tm,
+            entries_getter=lambda: self._library,
+            now_meta_getter=lambda: self._deck_meta[self._target],
+        )
         # 跨线程信号连接（worker 线程 emit → 主线程槽）
         self.analysis_ready.connect(self._append_row_safe)
         self.status_message.connect(self._status)
@@ -493,6 +501,25 @@ class MainWindow(QMainWindow):
         self._fx_status.setFixedSize(s(120), s(20))  # J4 缩放
         fx_row.addWidget(self._fx_status, 1)
         box.addLayout(fx_row)
+        # M2 推荐区（PL002.12）：推荐曲名小屏 + explanation + NEXT 单步 + AUTO 开关
+        # （窄列适配：小屏 110 + 按钮短名——effects 内容区 264 内放得下）
+        rec_row = QHBoxLayout()
+        rec_row.setSpacing(_SP_SM)
+        self._rec_display = MiniDisplay()
+        self._rec_display.setFixedSize(s(110), s(20))
+        self._auto_next_btn = GlowButton("NEXT")
+        self._auto_next_btn.setToolTip("Auto Next：按兼容分推荐下一曲并立即 Prepare（单步）")
+        self._auto_btn = GlowButton("AUTO")
+        self._auto_btn.setCheckable(True)
+        self._auto_btn.setToolTip("自动模式：每次 Mix 完成后自动推荐并 Prepare 下一曲；手动装填即退出")
+        rec_row.addWidget(QLabel("推荐"))
+        rec_row.addWidget(self._rec_display)
+        rec_row.addWidget(self._auto_next_btn)
+        rec_row.addWidget(self._auto_btn)
+        box.addLayout(rec_row)
+        self._rec_label = QLabel("")
+        self._rec_label.setStyleSheet("font-size: 11px; background: transparent;")
+        box.addWidget(self._rec_label)
         # 转场（FLX4 无此部件，保留功能：Prepare/Mix）
         self._prepare_btn = GlowButton("Prepare 来曲")
         self._prepare_btn.setToolTip("以目标盘为当前曲、选中曲为来曲，预渲染变速转场缓冲")
@@ -610,6 +637,9 @@ class MainWindow(QMainWindow):
         self._phones_cue_a.clicked.connect(lambda: self._on_cue_preview("a"))
         self._phones_cue_b.clicked.connect(lambda: self._on_cue_preview("b"))
         self._phones_vol.valueChanged.connect(self._on_cue_volume)
+        # M2 推荐区接线（PL002.12）
+        self._auto_next_btn.clicked.connect(self._on_recommend_and_prepare)
+        self._auto_btn.toggled.connect(self._toggle_automix)
         # 表演键（E2.8）
         self._slip_btns["a"].toggled.connect(self._engine.deck_a.slip_toggle)
         self._slip_btns["b"].toggled.connect(self._engine.deck_b.slip_toggle)
@@ -671,11 +701,12 @@ class MainWindow(QMainWindow):
         self._append_row(path, rec)
 
     def _append_row(self, path: str, rec: dict) -> None:
-        # 追加一行到表格与曲库列表（兼容标记随当前播放盘 BPM 刷新；
-        # H3.1：tempo_compatible 顶层导入）
-        bpm = float(rec.get("bpm", 0.0) or 0.0)
-        key = rec.get("key", "?") or "?"
-        energy = rec.get("energy", 0)
+        # 追加一行到表格与曲库列表（条目统一走 library.entry_from——PL002.6：
+        # 增加 name/artist/timbre 字段供 automix 消费；兼容标记随当前播放盘 BPM）
+        entry = library_mod.entry_from(path, rec)
+        bpm = entry["bpm"]
+        key = entry["key"]
+        energy = entry["energy"]
         now_bpm = self._deck_meta[self._target].get("bpm", 0.0)
         mark = ":)" if tempo_compatible(now_bpm, bpm) else ""
         row = self._table.rowCount()
@@ -683,16 +714,14 @@ class MainWindow(QMainWindow):
         for col, text in enumerate(
             (
                 mark,
-                Path(path).name,
+                entry["name"],
                 f"{bpm:.1f}" if bpm > 0 else "---",
                 key,
                 str(energy),
             )
         ):
             self._table.setItem(row, col, QTableWidgetItem(text))
-        self._library.append(
-            {"path": path, "bpm": bpm, "key": key, "energy": energy, "record": rec}
-        )
+        self._library.append(entry)
         self._table.item(row, 0).setData(Qt.UserRole, path)
         self._update_lib_hint()  # PL001.13：有行即隐藏引导句
 
@@ -725,8 +754,14 @@ class MainWindow(QMainWindow):
             "path": path,
             "bpm": entry["bpm"],
             "key": entry["key"],
+            "energy": entry.get("energy", 0),
+            "timbre": entry.get("timbre"),
             "downbeats": list(entry["record"].get("downbeats", [])),
         }
+        # PL002.11：手动装填退出自动模式（防双源打架）
+        if self._automix.auto_mode:
+            self._set_automix_ui(False, quiet=True)
+            self._status("手动装填：AUTO 自动模式已退出")
         self._status(f"已加载到 DECK {letter.upper()}: {Path(path).name}")
 
     def _load_selected_to(self, letter: str) -> None:
@@ -783,6 +818,9 @@ class MainWindow(QMainWindow):
                 "downbeats": list(entry["record"].get("downbeats", [])),
             }
             self._last_load = (None, 0.0)
+            # PL002.11：手动装填退出自动模式
+            if self._automix.auto_mode:
+                self._set_automix_ui(False, quiet=True)
             self._status(f"Instant Doubles → DECK {other.upper()}")
             return
         self._last_load = (path, now)
@@ -928,6 +966,10 @@ class MainWindow(QMainWindow):
     def _on_prepare(self) -> None:
         # Prepare：以目标盘为 now，表格选中行为来曲，走 TransitionManager
         # I3.1：rubberband 前置探测（缺失只提示不阻断——SKIP 直混转场仍可用）
+        # PL002.11：手动 Prepare 退出自动模式（防双源打架）
+        if self._automix.auto_mode:
+            self._set_automix_ui(False, quiet=True)
+            self._status("手动 Prepare：AUTO 自动模式已退出")
         if not rubberband_available():
             self._status("⚠ rubberband 未找到：变速转场不可用，仅支持 SKIP 直混")
         row = self._table.currentRow()
@@ -964,10 +1006,13 @@ class MainWindow(QMainWindow):
         self.status_message.emit(f"Prepare 完成（{skip}），可 Mix")
 
     def _on_mix(self) -> None:
-        # Mix Now：目标盘混入已预备缓冲（失败提示原因）
+        # Mix Now：目标盘混入已预备缓冲（失败提示原因）；自动模式下链式
+        # prepare 下一曲（PL002.11）
         now_deck = getattr(self._engine, f"deck_{self._target}")
         if self._tm.mix_now(now_deck):
             self._status("Mix 开始")
+            if self._automix.auto_mode:
+                self._automix.on_mix_started(now_deck)
         else:
             self._status("Mix 被拒：无预备缓冲或状态不允许")
 
@@ -1124,6 +1169,41 @@ class MainWindow(QMainWindow):
         if player is not None:
             player.set_volume(v)
 
+    # --- M2 自动编排（PL002.12） ---
+
+    def _on_recommend_and_prepare(self) -> None:
+        # Auto Next：推荐下一曲（小屏+理由显示）并立即 Prepare 装填
+        rec = self._automix.recommend()
+        if rec is None:
+            self._rec_display.set_text("--")
+            self._rec_label.setText("无可用推荐（需当前盘已知 BPM 与曲库数据）")
+            self._status("无可用推荐：当前盘需已知 BPM，曲库需有其他曲目")
+            return
+        self._rec_display.set_text(rec["entry"]["name"][:12])
+        self._rec_label.setText(rec["explanation"])
+        now_deck = getattr(self._engine, f"deck_{self._target}")
+        if self._automix.prepare_next(now_deck, on_done=self._on_prepared_done):
+            self._status(f"已推荐并预备: {rec['entry']['name']}（{rec['explanation']}）")
+        else:
+            self._status("推荐预备失败（当前盘需 PLAYING 且已知 BPM）")
+
+    def _set_automix_ui(self, on: bool, quiet: bool = False) -> None:
+        # AUTO 状态统一设置（PL002.11：auto_mode + 按钮勾选 + LED 三同步——
+        # 程序化退出（手动装填）不依赖 toggled 信号；quiet=不发状态栏）
+        self._automix.auto_mode = bool(on)
+        self._auto_btn.blockSignals(True)
+        self._auto_btn.setChecked(bool(on))
+        self._auto_btn.blockSignals(False)
+        self._auto_btn.set_led(bool(on), _UI.get("glow_blue", "#2f8bff"))
+        if not quiet:
+            self._status(
+                f"AUTO 自动模式{'开：Mix 完成后自动接歌' if on else '关'}"
+            )
+
+    def _toggle_automix(self, on: bool) -> None:
+        # AUTO 开关槽（用户点击 toggled 驱动；转统一设置）
+        self._set_automix_ui(bool(on))
+
     # --- 主题切换（J2 批次 2） ---
 
     def _cycle_theme(self) -> None:
@@ -1260,6 +1340,7 @@ class MainWindow(QMainWindow):
         # 关闭：置关闭标记（分析 worker 回调前检查，I3.6 防 emit 已删对象崩溃）、
         # 停止定时器并关闭引擎流（异常捕获不崩溃）
         self._closing = True
+        self._set_automix_ui(False, quiet=True)  # PL002.11：关闭即停自动模式
         self._timer.stop()
         try:
             self._engine.close()
@@ -1287,6 +1368,8 @@ class MainWindow(QMainWindow):
 #     百分比、main = 各列最小宽 + 富余按份额分配——构造与 show 后各一次；
 #     原百分比 setSizes 总和超主区被压缩+钳制是列宽失真根因）
 #   _update_lib_hint()：空库引导句显隐（PL001.13，rowCount==0 时可见）
+#   _on_recommend_and_prepare()/_toggle_automix(on)：M2 推荐区（PL002.12——
+#     Auto Next 单步推荐装填；AUTO 勾选自动模式，手动装填即退出防双源）
 #   _toggle_target/_open_folder/_status/closeEvent：目标盘/文件对话框/状态栏/关闭
 # 设计理由：UI 只发指令（信号→引擎方法，B1 纪律）；引擎/转场注入便于无头测试；
 #   后台分析经 QueuedConnection 回主线程（Qt 线程安全）

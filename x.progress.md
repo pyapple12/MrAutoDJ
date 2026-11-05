@@ -359,9 +359,11 @@
 
 # PL/FIX/PATCH 任务轨道（2026-11-05 起：三线编号，规则见 AGENTS.md 任务清单纪律；以上字母系列封存仅作历史勾选依据）
 
-## 未完成
+## 已完成 ✅
 
-### PL001: UI 评审修复（截断与列宽 / 面板补丁 / 激活态层级） [评审 2026-11-05 → z.plan.md 附录 PL001]
+### PL001: UI 评审修复（截断与列宽 / 面板补丁 / 激活态层级） [评审 2026-11-05 → z.plan.md 附录 PL001] ✅
+
+> 结果：probe_pl001 全 PASS + 22/22 探针回归 + after 截图核对全过；执行中升级两处根因（GlowButton 无 sizeHint 覆写、五列最小宽超主区→Pad 全宽化 + mins/shares 机制）；遗留 PanelFrame 标题重叠记 y.problem#P5。16/16 条勾结，已随 V0.2.6.1 提交推送（98ae909）。详见 z.plan.md 附录 PL001。
 
 > 来源：taste-skill（app-screens 模式）UI 评审，overall 6.0，Top3 = 截断与列宽 / 面板补丁与状态诚实 / 激活态层级。方案（四组措施 + 验证方案）见 z.plan.md 附录 PL001，做法均已到文件/函数级。
 > 执行约定：走 progress-task 流程——每条先写探针断言（先 FAIL 后 PASS）再实现；before 截图已存 `.temp/ui_preview/review/`，收尾出 after 对比；不动引擎层与配色 token 值。
@@ -393,3 +395,40 @@
 
 - [x] PL001.15 探针与全量回归 —— 新建 `.temp/probe_pl001.py`（组 A-D 全部断言，TDD 先 FAIL 后 PASS）；全量 21 既有探针重跑 PASS（p5/p6/j0 的文本/布局断言随 A2-A5 同步更新）；冒烟 import；验证：RESULT 全 PASS（2026-11-05 已验证：probe_pl001 全 PASS + 22/22 探针回归 + 冒烟 OK）
 - [x] PL001.16 after 截图对比与文档 —— 重跑 `.temp/review_shots.py` 出 after 组（dark 空载/加载、light 加载、三特写）与 before 逐项目检（截断清零/无色块/VU 框架/Jog 无叠字/FX ON 描边/空态引导）；多模态读图核对；文档同步（本组勾选 + z.plan 附录 PL001 状态回写 + README 徽章随版本）；提交（四段式 V0.2.6.1，用户执行）（2026-11-05 已验证：after 截图 dark/light×3 特写目检全过；说明区 8 文件同步；y.problem 补 P5）
+
+## 未完成
+
+### PL002: M2 AI 自动 DJ（兼容性评分 / Camelot 选曲 / Set 规划 / 自动转场） [plan#M2 → z.plan.md 附录 PL002]
+
+> 方案（设计决策/五组措施/验证方案/边界）见 z.plan.md 附录 PL002；核心 = `modules/automix.py` 占位转正（确定性贪心编排，非 LLM）+ 分析器 timbre 字段（缓存 V2）+ TransitionManager 桥与自动循环 + Effects 推荐区 UI。人声冲突维度明确不做（依赖缺位，里程碑偏差已记录）。
+> 执行约定：评分/规划/解析全为纯函数 TDD（先 FAIL 后 PASS）；桥接用假引擎；全量回归关注 g1/i2 缓存断言（V2 首跑重分析属预期）。
+
+#### 组 A：评分核心（automix.py 纯逻辑）
+
+- [x] PL002.1 Camelot 打分表 —— `automix.py` 新增 `key_score(key_a, key_b) -> float`：复用 `analyzer.parse_key`（解析异常 → 0.5 中性）；打分表 = 同键 1.0 / 同字母相邻号 0.9 / 同号异字母 0.85 / 对角相邻 0.6 / 其余 0.2 / 任一 "?" 0.5（模块级 `_KEY_SCORES` 常量）；验证：probe_pl002_score 打分表全用例（先 FAIL——占位恒 0.5——后 PASS）（2026-11-05 已验证：打分表全用例过（含双记谱归一 _parse_key_any——占位红灯后实现））
+- [x] PL002.2 维度分与聚合 —— `automix.py` 新增 `bpm_score`（复用 transition.fold_ratio：r_eff==1→1.0 / half/double→0.75 / 线性衰减 / bpm≤0→0.4）、`energy_score`（exp(-(Δ/2)²)、缺→0.5）、`timbre_score`（欧氏距离高斯、缺→0.5）+ 重写占位 `compatibility_score(track_a, track_b) -> {overall, scores, warnings}`（四维加权 `base.json automix_weights`，维度缺失入 warnings）；验证：probe_pl002_score 聚合与权重断言（2026-11-05 已验证：四维分+聚合+warnings 过；权重配置和=1（automix_weights））
+- [x] PL002.3 评分探针 —— 新建 `.temp/probe_pl002_score.py`（~15 断言：打分表/倍速/中性值/权重和=1/缺失中性），首跑红灯；验证：转绿 RESULT PASS（2026-11-05 已验证：probe_pl002_score PASS（首跑 ImportError 红灯→转绿））
+
+#### 组 B：分析扩展与曲库接入
+
+- [x] PL002.4 音色概要字段 —— `analyzer.py` 新增 `_detect_timbre(y, sr) -> [c, b, r]`（spectral_centroid/bandwidth/rolloff(0.85) 全程均值按固定参考范围归一 [200,6000]/[200,4000]/[1000,10000]Hz）；`analyze_file` 组装 `record["timbre"]`；`ANALYSIS_VERSION = 2`（旧缓存自动失效重分析）；验证：probe 断言 440Hz 正弦 vs 白噪质心分离 + 版本失效路径（2026-11-05 已验证：timbre 三维归一（正弦/白噪质心分离断言过）；ANALYSIS_VERSION=2）
+- [x] PL002.5 艺人解析与条目构造 —— `library.py` 占位转正：新增 `parse_artist(path) -> str | None`（Path.stem 首个 " - " 分割取左段；空/超 40 字 → None）与 `entry_from(path, record) -> dict`（`{path, name, artist, bpm, key, energy, timbre, record}`）；验证：probe_pl002_score 补文件名用例（标准/无分隔/超长/中文）（2026-11-05 已验证：parse_artist/entry_from 全用例过（标准/无分隔/超长/中文/空记录））
+- [x] PL002.6 UI 曲库迁移 —— `main_window.py`：`_append_row`/Instant Doubles 的条目构造改调 `library.entry_from`（`_library` 条目新增 name/artist/timbre 字段，表格五列渲染不变）；验证：冒烟 + probe_g1（表头/兼容标记）不回归（2026-11-05 已验证：_append_row 走 entry_from；probe_g1 表头/兼容标记不回归）
+
+#### 组 C：Set 规划（automix.py 纯逻辑）
+
+- [x] PL002.7 弧线与贪心链 —— `automix.py` 新增 `plan_set(entries, start, length) -> {sequence, explanations, warnings, arc}`：能量弧线目标 `base.json automix_energy_arc=[0.5,0.8,1.0,1.0,0.7]` 按 length 归一插值；每步评分 = `overall × exp(-|e_now - arc_i|/0.3)` 取最高；约束 = 已播去重 + 同艺人间隔 `automix_same_artist_gap=3`（候选不足降级并 warnings 声明）；explanation 列贡献前二的维度（如 "Key 8A→8B 关系调；BPM 倍频"）；验证：probe_pl002_set（先 FAIL 后 PASS）（2026-11-05 已验证：plan_set 贪心链全断言过（max 稳定取首防同分 dict 比较 TypeError））
+- [x] PL002.8 Set 探针 —— 新建 `.temp/probe_pl002_set.py`：合成 8 曲曲库（可控 BPM/Key/energy/artist）断言序列长度/去重/同艺人间隔/弧线贴合/explanation 非空；验证：转绿 RESULT PASS（2026-11-05 已验证：probe_pl002_set PASS（S9 用例修正：3 曲库 length=2））
+
+#### 组 D：自动转场调度与 UI 接入
+
+- [x] PL002.9 推荐桥 AutomixController —— `automix.py` 新增 `class AutomixController`：`__init__(tm, entries_getter)` / `recommend(now_meta) -> {entry, explanation} | None` / `auto_mode` 开关 / `on_mix_started()`（自动模式记录已播 + 经 `tm.prepare` 链式装填下一曲，cue=下一曲首 downbeat 或 0）；验证：probe_pl002_bridge 假 tm 断言调用序列（2026-11-05 已验证：Controller recommend 排除自身/已播、无 BPM None、prepare_next 经 tm 断言过）
+- [x] PL002.10 转场 EQ 渐变 —— `transition_manager.py mix_now()`：启动后守护线程 8 步 × fade/10 调 `now_deck.eq.set_low(-1 → 0)`（末步恢复；mark_stale/新 mix 抢占时线程退出）；**回调线程零改动**（纪律不破）；验证：probe_pl002_bridge 断言渐变首末值与线程退出（2026-11-05 已验证：EQ 渐变首末值+token 抢占退出断言过；scheduled 延迟到触发；回调零改动）
+- [x] PL002.11 自动循环接线 —— `main_window.py`：`_on_mix` 成功后若 `auto_mode` 调 `on_mix_started()` 链式 prepare；手动 Prepare/Load 置 `auto_mode=False` + 状态栏提示（防双源）；`closeEvent` 停控制器；验证：probe_pl002_bridge 手动操作退出自动模式断言（2026-11-05 已验证：手动 Prepare/Load/InstantDoubles 退出 AUTO（_set_automix_ui 三同步——修 checked 与 LED 脱节）；closeEvent 停）
+- [x] PL002.12 UI 推荐区 —— `main_window._build_effects_panel()`：Prepare 按钮上方加推荐行（MiniDisplay 推荐曲名 + QLabel explanation 摘要 + `Auto Next` GlowButton 单次推荐装填 + `AUTO` GlowButton 勾选自动模式蓝色 LED）；接线 `_on_recommend/_toggle_automix`；验证：probe_pl002_bridge 控件存在与信号 + 截图目检（2026-11-05 已验证：推荐区窄列适配（110 小屏+NEXT 短名，explanation 独立行）截图完整可读）
+- [x] PL002.13 桥接探针 —— 新建 `.temp/probe_pl002_bridge.py`（假引擎+假 tm：recommend 选择/链式 prepare 序列/EQ 渐变首末值/手动退出自动模式）；验证：转绿 RESULT PASS（2026-11-05 已验证：probe_pl002_bridge PASS（R1-R6/E1-E3/L1-L4））
+
+#### 组 E：检验与收尾
+
+- [x] PL002.14 全量回归 —— probe_pl002_score/set/bridge 全 PASS + 既有 22 探针重跑（g1/i2 缓存断言观察 V2 重分析自愈）+ 冒烟 + Effects 推荐区截图；验证：RESULT 全 PASS（2026-11-05 已验证：25/25 探针 PASS（22 回归+3 新）+ 冒烟 OK + Effects 截图读图）
+- [x] PL002.15 文档与提交 —— README 特性补 M2 段落、z.plan 里程碑 M2 勾选 + 本附录状态回写、x.progress 勾选、live 用户验收（真曲库 Auto Next 单步 + AUTO 短 Set 听感）、提交（四段式 V0.2.7.0，用户执行）（2026-11-05 已验证：README M2 段落/本组勾选/附录状态回写完成；live 听感与提交待用户）

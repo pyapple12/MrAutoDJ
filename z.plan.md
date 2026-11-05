@@ -247,11 +247,11 @@ MrAutoDJ：从虚拟 DJ 台起步，逐步演进为 AI 自动 DJ 与 LLM 电台�
   - [ ] **批次 3：贴图拟物化**——A 路线起步（`_skins.py` 程序化渲染 PNG 贴图），B SVG 皮肤 / C 手工设计后续
   - [ ] **批次 4：大小缩放**——ui.json 加 `ui_scale`，控件尺寸/字号/间距参数化乘系数（与 Theme 协同，贴图按分辨率生成）
   - [ ] 集成验证：无头截图 + 全量回归 + GUI 实测（FLX4 交互清单逐项）
-- [ ] **M2 第二步：AI 自动 DJ**
-  - [ ] 兼容性评分：BPM 倍频归一化 / Camelot 档位 / 能量曲线 / 音色 / 人声冲突
-  - [ ] 调和混音（Camelot 轮盘）选曲与 Set 规划（同艺人约束/去重/能量弧线）
-  - [ ] 节拍对齐自动转场：prepare/mix 管线接入 AI 调度（EQ 渐变 + 下拍触发）
-  - [ ] 自动 Set 规划：贪心编排 + 能量曲线 + 可解释评分（explanation/warnings）
+- [x] **M2 第二步：AI 自动 DJ**（V0.2.7.0，2026-11-05 完成，方案与任务见附录 PL002 / x.progress.md PL002；人声冲突维度因依赖缺位明确不做——偏差记录于附录 PL002 决策 1）
+  - [x] 兼容性评分：BPM 倍频归一化 / Camelot 档位 / 能量曲线 / 音色（人声冲突不做）
+  - [x] 调和混音（Camelot 轮盘）选曲与 Set 规划（同艺人约束/去重/能量弧线）
+  - [x] 节拍对齐自动转场：prepare/mix 管线接入 AI 调度（EQ 渐变 + 下拍触发）
+  - [x] 自动 Set 规划：贪心编排 + 能量曲线 + 可解释评分（explanation/warnings）
 - [ ] **M3 第三步：Claude 电台**
   - [ ] 引擎暴露控制接口（HTTP/MCP，portmanteau 工具模式）
   - [ ] 混合播放队列（song/tts/silence 顺序播放）
@@ -642,7 +642,74 @@ H 系列 19 项修复在位（除 H0.1 漏改）；配置键 40 个与读取方�
 
 > 立项：2026-11-05。来源 = taste-skill（app-screens 模式）UI 评审报告（评审素材 `.temp/ui_preview/review/`，before 截图已存档）；评审结论 overall 6.0（design 5.5 / usability 5.5 / creativity 7.5 / content 7），Top3 问题：①文字大面积截断+曲库列塌缩 ②QSS 全局背景在拟物面板上打黑/白补丁+无内容色块+VU 空态不可见 ③激活态层级失衡（FX ON 白光抢主操作/效果键选中色不一致/Pitch 原生滑块）。
 > 定位：纯 UI 层修复（themes/widgets/main_window/deck_widget/beat_fx_widget/pad_widget），引擎与业务逻辑零改动；评审"硬件拟物"设计意图保留（金属/辉光/渐变不属违规项），只修可用性硬伤与一致性。
-> 状态：✅ **已实施**（2026-11-05，任务组 PL001 见 x.progress.md——16/16 条勾结；probe_pl001 全 PASS + 22/22 探针回归 + 冒烟 OK；after 截图 dark/light×3 特写目检全过（截断清零/色块消失/VU 框架可见/Jog 无叠字/FX ON 描边激活/空态引导）；执行中升级两处根因——GlowButton 无 sizeHint 覆写（截断源头）与五列最小宽超主区（Pad 全宽化 + mins+shares 机制解决）；遗留 PanelFrame 标题重叠记 y.problem#P5。提交 V0.2.6.1 由用户执行）
+> 状态：✅ **已实施**（2026-11-05，任务组 PL001 见 x.progress.md——16/16 条勾结；probe_pl001 全 PASS + 22/22 探针回归 + 冒烟 OK；after 截图 dark/light×3 特写目检全过（截断清零/色块消失/VU 框架可见/Jog 无叠字/FX ON 描边激活/空态引导）；执行中升级两处根因——GlowButton 无 sizeHint 覆写（截断源头）与五列最小宽超主区（Pad 全宽化 + mins+shares 机制解决）；遗留 PanelFrame 标题重叠记 y.problem#P5。已随 V0.2.6.1 提交推送 98ae909）
+
+---
+
+## 附录 PL002：M2 AI 自动 DJ（兼容性评分 / Camelot 选曲 / Set 规划 / 自动转场）
+
+> 立项：2026-11-05（对应里程碑表 M2 四条：兼容性评分 / 调和混音选曲与 Set 规划 / 节拍对齐自动转场 / 自动 Set 规划）。
+> 定位：`modules/automix.py` 从占位转正为 M2 核心——**确定性编排算法**（贪心 + 打分表，非 LLM；LLM 报幕属 M3 radio.py）；纯逻辑零 GUI 依赖（分层红线），UI 只做接入。
+> 代码基础盘点（2026-11-05 实读）：`analyzer.Key` 已有 Camelot/wheel 记谱、`transition.fold_ratio/tempo_compatible/plan_transition` 已有八度折叠与 skip-stretch 判定、`TransitionManager.prepare/mix_now` 已有 downbeat 对齐与 epoch、`main_window._library` 已有 [{path, bpm, key, energy, record}] 曲库结构；缺口 = 打分表/贪心规划/音色维度/艺人元数据/自动循环。
+> 状态：✅ **已实施**（2026-11-05，任务组 PL002 见 x.progress.md——15/15 条勾结；probe_pl002_score/set/bridge 全 PASS + 25/25 全量回归 + 冒烟 + Effects 推荐区截图读图；执行中修正两处设计落地细节——key_score 需双记谱解析（Camelot "8A"/标准 "A minor"）、贪心同分 max 稳定取首防 dict 比较 TypeError；人声冲突维度按决策 1 不做已记录。live 听感验收与提交 V0.2.7.0 由用户执行）
+
+### 一、设计决策（含取舍）
+
+1. **评分五维 → M2 实现四维 + 人声冲突明确不做**：BPM / Key(Camelot) / Energy / Timbre 四维有数据基础（timbre 需新增分析字段，PL002.4）；**人声冲突不做**——需 Demucs/人声分离依赖（重、GPL 生态风险、分析耗时翻倍），且 M1 分析器无此字段；记入里程碑偏差，待 M3 或独立 PL 再议（诚实原则：不虚构能力）。
+2. **Camelot 打分表**（DJ 惯例，常量进 automix.py）：
+   - 同键 1.0 / 同号异字母（关系大小调）0.85 / 同字母相邻号（能量步进 ±1）0.9 / 对角相邻（异字母 ±1 号）0.6 / 其余 0.2；任一 key 缺失（"?"）→ 0.5 中性
+3. **BPM 分**：复用 `transition.fold_ratio` 八度折叠——r_eff==1 → 1.0；half/double-time → 0.75；否则 `max(0, 1 - |r_eff-1|/(tolerance*2))`（tolerance 用 TEMPO_MATCH_TOLERANCE）；bpm≤0 → 0.4
+4. **Energy/Timbre 分**：能量差 `exp(-(Δe/2)²)`（σ=2 拍级）；timbre 为谱概要（0-1 归一三维）欧氏距离高斯衰减（σ 进配置）；缺失一律 0.5 中性
+5. **总分配置**：`base.json automix_weights = {"bpm": 0.3, "key": 0.3, "energy": 0.2, "timbre": 0.2}`——`compatibility_score(a, b) -> {overall, scores{四维}, warnings[]}`
+6. **音色字段**：`analyzer._detect_timbre`（谱质心/谱带宽/谱滚降 85% 的全程均值，各自 min-max 归一到 0-1）→ `record["timbre"] = [c, b, r]`；**ANALYSIS_VERSION 1→2**（旧缓存自动失效重分析，已有机制）
+7. **艺人元数据**：无 ID3 解析依赖（避免 mutagen 新依赖）——文件名约定宽容解析 `"Artist - Title.ext"`（首个 " - " 分割；无分隔符 → artist=None，同艺人约束对该曲自动跳过）
+8. **Set 规划**：贪心链（非全局最优，可解释够用——KISS）：每步从候选取 `compatibility_score × 能量弧线贴合度` 最高者；能量弧线 = 目标曲线 `[开场 0.5 → 峰 1.0 → 回落 0.6]` 按曲数归一（形状配置 `base.json automix_energy_arc`）；约束 = 已播去重 + 同艺人间隔 ≥ `automix_same_artist_gap`（默认 3 首）；每步输出 `explanation`（如 "Key 8A→8B 关系调 + BPM 倍频 + 能量 +1"）与 `warnings`（"候选不足跳过艺人约束"）
+9. **自动转场**：复用 `TransitionManager.prepare/mix_now` 全部机制（downbeat 对齐/epoch/skip-stretch），automix 只负责"选曲与推荐"；新增**转场 EQ 渐变**——mix 启动后由 TransitionManager 渐变线程分步调 `now_deck.eq.set_low`（-1 → 0，8 步斜坡，非回调线程——回调零 IO 纪律不破），经典 low-cut 交接手法
+10. **自动模式**：UI 开关 + mix 完成自动 prepare 下一曲的循环（AutomixController 持有队列指针）；停止条件 = 无候选 / 用户关闭 / 手动暂停（手动 Load/Prepare 时自动模式退出，防双源打架）
+
+### 二、措施（五组，文件/函数级）
+
+#### 组 A 评分核心（automix.py 纯逻辑，TDD 先行）
+
+- **A1 Camelot 打分**——`automix.py` 新增 `key_score(key_a: str, key_b: str) -> float`：复用 `analyzer.parse_key` 解析（异常 → 0.5 中性）；按决策 2 打分表实现（Camelot 号/字母经 `Key.camelot` 性质换算，不重复造轮）
+- **A2 维度分与聚合**——`automix.py` 新增 `bpm_score/energy_score/timbre_score`（模块级常量读 `base.json automix_weights/automix_timbre_sigma`）+ 重写占位 `compatibility_score(track_a: dict, track_b: dict) -> dict`（四维聚合 + warnings：维度缺失清单）
+- **A3 探针**——`.temp/probe_pl002_score.py`：合成用例表（同键 1.0/关系调 0.85/倍速 0.75/未知中性 0.5/权重和=1 等 ~15 断言；**先 FAIL（占位恒 0.5）后 PASS**）
+
+#### 组 B 分析扩展与曲库接入
+
+- **B1 音色概要**——`analyzer.py` 新增 `_detect_timbre(y, sr) -> list[float]`（`librosa.feature.spectral_centroid/bandwidth/rolloff(roll_percent=0.85)` 全程均值，按固定参考范围 min-max 归一：质心 [200,6000]Hz、带宽 [200,4000]Hz、滚降 [1000,10000]Hz）+ `analyze_file` 组装 `record["timbre"]` + `ANALYSIS_VERSION = 2`；验证：probe 断言合成正弦/白噪 timbre 向量区分度 + 缓存版本失效重分析
+- **B2 艺人解析与曲库条目**——`library.py` 占位转正：新增 `parse_artist(path) -> str | None`（Path.stem 按首个 " - " 分割取左段，空/过长(>40 字) → None）与 `build_entries(paths: list[str], records: dict) -> list[dict]`（输出 `{path, name, artist, bpm, key, energy, timbre, record}`——**main_window._library 迁移到此结构**：`_append_row` 改用 build_entries 单条构造，曲库表刷新逻辑不变）；验证：probe 文件名用例（标准/无分隔/超长）
+- **B3 UI 曲库迁移**——`main_window.py`：`_library` 条目构造改调 `library.build_entries` 单条版本（`library.entry_from(path, record)`），`_entry_by_path`/`_append_row`/兼容标记逻辑保持；验证：冒烟 + probe_g1（表头/兼容标记断言）不回归
+
+#### 组 C Set 规划（automix.py 纯逻辑）
+
+- **C1 弧线与贪心链**——`automix.py` 新增 `plan_set(entries: list[dict], start: dict | None, length: int) -> dict`：输出 `{sequence: [entry...], explanations: [str], warnings: [str], arc: [float]}`；能量弧线目标 `automix_energy_arc = [0.5, 0.8, 1.0, 1.0, 0.7]`（按 length 归一插值）；每步评分 = `overall × exp(-|e_now - arc_i|/0.3)` 取最高；约束：已播去重、同艺人间隔（`automix_same_artist_gap=3`，候选不足时降级并在 warnings 声明）；`explanation` 由四维 scores 组装（只列贡献前二的维度）
+- **C2 探针**——`.temp/probe_pl002_set.py`：合成曲库（8 曲可控 BPM/Key/energy/artist）断言：序列长度/去重/同艺人间隔/弧线贴合顺序/explanation 非空（先 FAIL 后 PASS）
+
+#### 组 D 自动转场调度与 UI 接入
+
+- **D1 推荐桥**——`automix.py` 新增 `class AutomixController`：`__init__(tm: TransitionManager, entries_getter)`、`recommend(now_meta: dict) -> dict | None`（返回 `{entry, explanation}`；无候选/无 BPM → None）、`auto_mode: bool` 开关、`on_mix_started()`（自动模式：记录已播 + 立即推荐并 prepare 下一曲——经 `tm.prepare`，cue_seconds=下一曲首 downbeat 或 0）
+- **D2 转场 EQ 渐变**——`transition_manager.py mix_now()`：SKIP/STRETCH 启动后起守护线程（daemon），8 步 × fade/10 间隔调 `now_deck.eq.set_low(-1 → 0)`（末步恢复 0；被 mark_stale/新 mix 抢占时线程检测 epoch/代次退出）；**回调线程零改动**（纪律不破）；验证：probe 断言渐变序列首末值与线程退出
+- **D3 自动循环**——`main_window.py`：`_on_mix` 成功后若 `self._automix.auto_mode` 调 `on_mix_started()` 链式 prepare；手动 Prepare/Load 时置 `auto_mode=False` 并状态栏提示（防双源）；`closeEvent` 停控制器
+- **D4 UI 推荐区**——`main_window._build_effects_panel()`：Prepare/Mix 按钮上方加推荐行（MiniDisplay 显示推荐曲名 + QLabel 显示 explanation 摘要 + `Auto Next` GlowButton（单次推荐并装填）+ `AUTO` GlowButton（勾选 = 自动模式，蓝色 LED））；接线 `_on_recommend/_toggle_automix`
+- **D5 探针**——`.temp/probe_pl002_bridge.py`：假引擎 + 假 tm 断言 recommend 选择/自动链 prepare 调用序列/手动操作退出自动模式/EQ 渐变首末值
+
+#### 组 E 检验与收尾
+
+- **E1 全量回归**——probe_pl002_score/set/bridge 全 PASS + 既有 22 探针 + 冒烟（analyzer 缓存 V2 首次重分析耗时段落明）+ 截图（Effects 推荐区）
+- **E2 文档与提交**——README 特性（M2 段落）、z.plan 里程碑 M2 勾选与本附录状态回写、x.progress 勾选、提交（四段式 V0.2.7.0，用户执行）
+
+### 三、验证方案（总）
+
+1. **纯逻辑 TDD**：评分表/贪心链/艺人解析全为纯函数（合成用例，零音频依赖）——先 FAIL 后 PASS
+2. **分析管线**：`_detect_timbre` 用合成信号断言（440Hz 正弦 vs 白噪的谱质心显著分离）；V2 缓存失效重分析
+3. **桥接**：假引擎/假 tm 断言调用序列（不真渲染 rubberband）
+4. **回归**：全量探针（重点 g1/i2 缓存相关断言——ANALYSIS_VERSION 变更后 `probe` 中写缓存的用例自愈，观察即可）+ 截图读图
+5. **live（用户）**：真曲库跑 Auto Next 单步 + AUTO 模式一小段 Set，听感验收
+
+### 四、不做的事（边界）
+
+- 人声冲突维度（决策 1）与 LLM 参与（M3）；不引入 mutagen/Demucs 新依赖；不做全局最优 Set（贪心够用）；不改 M1.7 已有转场机制（对齐/epoch/skip-stretch 全复用）；UI 不做 Set 时间线可视化（远期）
 
 ### 一、目标
 

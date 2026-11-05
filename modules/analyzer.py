@@ -58,8 +58,8 @@ CUE_PARAMS = dict(
     _SC.base.get("cue_params", {"max_cues": 8, "min_spacing": 8.0, "n_mfcc": 13})
 )
 
-# 缓存算法版本：检测算法变更时 +1，旧缓存自动失效重算
-ANALYSIS_VERSION = 1
+# 缓存算法版本：检测算法变更时 +1，旧缓存自动失效重算（PL002.4：+timbre 字段 → 2）
+ANALYSIS_VERSION = 2
 
 # Krumhansl-Kessler 调性谱（key.py 约定，24 键相关打分用）
 _KK_MAJOR = np.array(
@@ -434,6 +434,31 @@ def _detect_energy(y: np.ndarray, sr: int, bpm: float) -> int:
 
 
 # ---------------------------------------------------------------------------
+# 音色概要（PL002.4）：谱质心/带宽/滚降三维归一，供 automix 音色兼容分
+# ---------------------------------------------------------------------------
+
+
+def _detect_timbre(y: np.ndarray, sr: int) -> list[float]:
+    # 音色概要三维 0-1 向量：谱质心/谱带宽/谱滚降(85%) 的全程均值，
+    # 各按固定参考范围 min-max 归一（质心 [200,6000]Hz / 带宽 [200,4000]Hz /
+    # 滚降 [1000,10000]Hz）——范围固定保证跨曲可比
+    import librosa
+
+    def _norm(series: np.ndarray, lo: float, hi: float) -> float:
+        mean = float(np.mean(series)) if len(series) else 0.0
+        return float(np.clip((mean - lo) / (hi - lo), 0.0, 1.0))
+
+    centroid = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
+    bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr)[0]
+    rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr, roll_percent=0.85)[0]
+    return [
+        _norm(centroid, 200.0, 6000.0),
+        _norm(bandwidth, 200.0, 4000.0),
+        _norm(rolloff, 1000.0, 10000.0),
+    ]
+
+
+# ---------------------------------------------------------------------------
 # 自动 CUE 点（D1.9，参考 cuekey/analysis/cues.py）
 # ---------------------------------------------------------------------------
 
@@ -491,13 +516,14 @@ def _detect_cues(
 
 
 def empty_record() -> dict:
-    # 默认分析记录（bpm=0/key="?"/beats 空）：分析失败或未缓存时的降级占位
+    # 默认分析记录（bpm=0/key="?"/beats 空/timbre None）：分析失败或未缓存时的降级占位
     return {
         "bpm": 0.0,
         "key": "?",
         "beats": [],
         "downbeats": [],
         "energy": 0,
+        "timbre": None,
         "cues": [],
     }
 
@@ -542,6 +568,7 @@ def analyze_file(path: str, with_cues: bool = True) -> dict:
         "beats": beats,
         "downbeats": downbeats,
         "energy": energy,
+        "timbre": _detect_timbre(y, ANALYSIS_SAMPLE_RATE),
         "cues": cues,
     }
 
@@ -852,6 +879,7 @@ if __name__ == "__main__":
 #   _pick_downbeat_phase：4 拍相位低频能量最大化（D1.5；4/4 假设）
 #   _detect_key(y, sr)：谐波分离 + chroma 中位数 + 24 键 KK 相关（含置信度）
 #   _detect_energy(y, sr, bpm)：响度/onset 密度/低频占比/拍速加权 → 1-10
+#   _detect_timbre(y, sr)：谱质心/带宽/滚降三维归一概要（PL002.4，automix 音色分）
 #   _detect_cues(y, sr, bpm, beat_times)：结构聚类分段 → downbeat 吸附 → 去重
 #   empty_record()：失败降级占位（bpm=0/key="?"，D1.12）
 #   analyze_file(path, with_cues)：单曲分析组装（D1.2；异常上抛由批处理降级）

@@ -58,6 +58,11 @@ GUI 基于 PySide6，音频引擎基于 python-sounddevice 实时回调，分析
   - 批次 2 Theme 化：token 运行期动态化（ui/palette.py）、dark/light 双主题、Ctrl+T 无重启切换
   - 批次 3 贴图 A 路线：程序化拉丝金属纹理 PNG 磁盘缓存（cache/ui_textures/，按主题/分辨率键控）
   - 批次 4 大小缩放：ui_scale 全局缩放因子（控件/间距统一乘系数）
+- **AI 自动 DJ（M2，V0.2.7.0）**：
+  - 兼容性评分：BPM 八度折叠 + Camelot 调和轮盘打分表 + 能量曲线 + 音色谱概要（三维归一），加权聚合可解释（explanation/warnings）
+  - Set 规划：贪心链 + 能量弧线（开场→峰→回落配置化）+ 同艺人间隔约束 + 去重
+  - 自动转场：复用 M1.7 转场管线（skip-stretch/下拍对齐）+ 转场 EQ 渐变（low-cut 交接）+ AUTO 自动接歌模式（Mix 完成自动装填下一曲，手动操作即退出）
+  - UI：Effects 推荐区（推荐曲名 + 理由 + NEXT 单步 + AUTO 开关）
 - **AI 自动 DJ（M2）**：
   - 调和混音（Camelot 轮盘）选曲
   - 节拍对齐自动转场（EQ 渐变）

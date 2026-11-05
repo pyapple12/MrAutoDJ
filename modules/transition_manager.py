@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from typing import TYPE_CHECKING, Callable
 
 from config.static.static_config import get_static_config
@@ -25,6 +26,10 @@ MIX_TRIGGER_MARGIN_SECONDS = float(_SC.base.get("mix_trigger_margin_seconds", 0.
 DEFAULT_FADE_SECONDS = float(_SC.base.get("default_fade_seconds", 16.0))
 # 变速恢复时长（秒，B1 默认 30s：STRETCH 缓冲渐变回原速的时长）
 DEFAULT_RESTORE_SECONDS = float(_SC.base.get("default_restore_seconds", 30.0))
+
+# 转场 EQ 渐变（PL002.10）：步数与步进间隔（秒）——low 从全切到 0 的斜坡，
+# 经 UI 线程等价的 setter 分步执行（回调线程零改动）
+EQ_RAMP_STEPS = int(_SC.base.get("eq_ramp_steps", 8))
 
 
 def _prepare_work(manager, next_path: str, my_epoch: int, plan: TransitionPlan) -> None:
@@ -70,6 +75,21 @@ def _prepare_work(manager, next_path: str, my_epoch: int, plan: TransitionPlan) 
             cb(None, exc)
 
 
+def _eq_ramp_worker(deck, fade_seconds: float, token: int, manager, delay: float) -> None:
+    # 转场 EQ 渐变（PL002.10，worker 线程允许 IO）：delay（scheduled 对齐等待）
+    # 后，low 从 -1（全切）分 EQ_RAMP_STEPS 步斜坡回 0——经典 low-cut 交接；
+    # token 不匹配（新 mix/mark_stale 抢占）即退出
+    if delay > 0:
+        time.sleep(delay)
+    interval = max(0.05, fade_seconds / (EQ_RAMP_STEPS * 2))
+    for step in range(EQ_RAMP_STEPS + 1):
+        with manager._lock:
+            if manager._eq_ramp_token != token:
+                return
+        deck.eq.set_low(-1.0 + (1.0 / EQ_RAMP_STEPS) * step)
+        time.sleep(interval)
+
+
 class TransitionManager:
     # 转场管理器：prepare（SKIP/STRETCH 预渲染，后台线程 + epoch 防陈旧）→
     # mix_now（样本级对齐混音 + 守卫）→ mark_stale（参数变更失效旧缓冲）
@@ -89,6 +109,8 @@ class TransitionManager:
         self._restore_seconds: float = DEFAULT_RESTORE_SECONDS
         # 混音进度回调（on_done(plan, error)），由调用方保证线程安全（UI 用信号）
         self._on_prepared: Callable | None = None
+        # 转场 EQ 渐换代次（PL002.10：新 mix/mark_stale 抢占旧渐变线程）
+        self._eq_ramp_token: int = 0
 
     # --- 只读状态（UI 展示用） ---
 
@@ -121,12 +143,14 @@ class TransitionManager:
 
     def mark_stale(self) -> None:
         # 参数（CUE/Fade/换曲）变更后调用：epoch+1 丢弃 in-flight worker 结果，
-        # 并清空已完成缓冲（旧缓冲依赖已变更参数，B1 真实 bug 教训）
+        # 并清空已完成缓冲（旧缓冲依赖已变更参数，B1 真实 bug 教训）；
+        # EQ 渐变 token+1（PL002.10：在途渐变线程退出）
         with self._lock:
             self._prep_epoch += 1
             self._preparing = False
             self._next_prepared = None
             self._next_plan = None
+            self._eq_ramp_token += 1
 
     # --- D3.1 预备 ---
 
@@ -200,6 +224,21 @@ class TransitionManager:
                 scheduled = candidates[0]
 
         now_deck.start_mix(buf, fade, scheduled_start_sample=scheduled)
+        # 转场 EQ 渐变（PL002.10）：low 全切→0 斜坡；scheduled 时先等对齐触发
+        # （延迟 = 触发点距当前位置的时长，避免触发前就切低频）
+        with self._lock:
+            self._eq_ramp_token += 1
+            token = self._eq_ramp_token
+        delay = (
+            max(0.0, (scheduled - now_deck.position) / SAMPLE_RATE)
+            if scheduled is not None
+            else 0.0
+        )
+        threading.Thread(
+            target=_eq_ramp_worker,
+            args=(now_deck, fade, token, self, delay),
+            daemon=True,
+        ).start()
         return True
 
 
@@ -218,7 +257,11 @@ class TransitionManager:
 #     后台线程解码+渲染（SKIP 原始切片 / STRETCH rubberband 变速）→ epoch 校验后安装
 #   mix_now(now_deck) -> bool：
 #     D3.2 守卫（PLAYING 且非 MIXING 且缓冲就绪）→ 取走缓冲 → SKIP 且 A 曲有
-#     downbeat 时样本级定时启动（scheduled_start_sample），否则立即 → start_mix
+#     downbeat 时样本级定时启动（scheduled_start_sample），否则立即 → start_mix；
+#     启动后 EQ 渐变线程（PL002.10：low -1→0 斜坡 8 步，scheduled 时延迟到触发；
+#     token 抢占退出——mark_stale/新 mix 使在途渐变失效）
+#   _eq_ramp_worker(deck, fade, token, manager, delay)：渐变 worker（模块级，
+#     H3.2 纪律——def 内 def 不落；worker 线程允许 IO/setter，回调零改动）
 # 设计理由：参考 B1 app.py（action_prepare_mix/action_mix_now/_commit_mix/_prep_epoch/
 #   _mark_stale 机制），抽成无 GUI 依赖的类便于无头测试；epoch 计数器解决
 #   "过期异步结果"（B1 Key invariants：worker 完成时比对启动时的 epoch，不一致即丢弃）
