@@ -10,12 +10,12 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QSlider,
     QVBoxLayout,
     QWidget,
 )
 
 from ui.waveform_widget import WaveformWidget
+from ui.widgets.fader_slider import FaderSlider
 from ui.widgets.glow_button import GlowButton
 
 # 静态配置解包（配色 token + 采样率换算基准，H0.6）
@@ -27,12 +27,19 @@ _SR = int(get_static_config().base.get("sample_rate", 44100))
 
 class DeckWidget(QWidget):
     # 打碟机控件：标题（曲名/BPM/调性）+ 波形 + 播放/CUE/循环按钮 + Pitch/Keylock
+    # + 循环键行（IN/OUT/4BEAT/◀▶）+ Beat Sync（J1.0）
     play_clicked = Signal()
     cue_clicked = Signal()
     loop_toggled = Signal(bool)
     beatloop_clicked = Signal(int)
     keylock_toggled = Signal(bool)
     pitch_changed = Signal(float)  # 百分比（-8..8）
+    loop_in_clicked = Signal()  # J1.0：循环入点
+    loop_out_clicked = Signal()  # J1.0：循环出点
+    loop_fourbeat_clicked = Signal()  # J1.0：4 拍自动循环
+    loop_halve_clicked = Signal()  # J1.0：循环减半（CALL ◀）
+    loop_double_clicked = Signal()  # J1.0：循环加倍（CALL ▶）
+    sync_toggled = Signal(bool)  # J1.0：Beat Sync 开关
 
     def __init__(self, name: str = "DECK", parent=None):
         # 初始化控件树：信息标签 / 波形 / 控制行 / Pitch 滑块
@@ -51,18 +58,47 @@ class DeckWidget(QWidget):
         self._beatloop_btn = GlowButton("Beatloop 4")
         self._keylock_cb = GlowButton("Keylock")
         self._keylock_cb.setCheckable(True)
+        # J1.1：Keylock 启用（变速不变调，rubberband 后台重渲染；音高保持有
+        # 1-2s 渲染延迟，去抖合并连续变化）
+        self._keylock_cb.setToolTip("Keylock 变速不变调（rubberband 后台重渲染，约 1-2s）")
 
-        self._pitch_slider = QSlider(Qt.Horizontal)
-        self._pitch_slider.setRange(-8, 8)
-        self._pitch_slider.setValue(0)
+        # J1.0：循环键行（IN/OUT/4BEAT + CALL ◀▶ = 减半/加倍）+ Beat Sync
+        self._loop_in_btn = GlowButton("IN")
+        self._loop_in_btn.setToolTip("循环入点：当前位置为起点（OUT 闭合后激活）")
+        self._loop_out_btn = GlowButton("OUT")
+        self._loop_out_btn.setToolTip("循环出点：当前位置为终点并激活循环")
+        self._loop_4beat_btn = GlowButton("4BEAT")
+        self._loop_4beat_btn.setToolTip("从当前位置起 4 拍自动循环")
+        self._loop_halve_btn = GlowButton("◀")
+        self._loop_halve_btn.setToolTip("循环长度减半")
+        self._loop_double_btn = GlowButton("▶")
+        self._loop_double_btn.setToolTip("循环长度加倍（钳制曲尾）")
+        self._sync_btn = GlowButton("SYNC")
+        self._sync_btn.setCheckable(True)
+        self._sync_btn.setToolTip("Beat Sync：对齐另一盘的有效 BPM（乐速倍率，可被 TEMPO 推子覆盖）")
+
+        # PL001.12：Pitch 滑块拟物化（QSlider → FaderSlider，量程只读反显语义不变）
+        self._pitch_slider = FaderSlider(-8.0, 8.0, 0.0, Qt.Horizontal, length=200)
         self._pitch_label = QLabel("Pitch 0%")
+        self._pitch_slider.setToolTip("Pitch 量程指示（实时变速由 TEMPO 推子驱动）")
 
         controls = QHBoxLayout()
+        controls.setSpacing(4)
         controls.addWidget(self._play_btn)
         controls.addWidget(self._cue_btn)
         controls.addWidget(self._loop_btn)
         controls.addWidget(self._beatloop_btn)
         controls.addWidget(self._keylock_cb)
+
+        # J1.0：循环/同步键行
+        loop_row = QHBoxLayout()
+        loop_row.setSpacing(4)
+        loop_row.addWidget(self._loop_in_btn)
+        loop_row.addWidget(self._loop_out_btn)
+        loop_row.addWidget(self._loop_4beat_btn)
+        loop_row.addWidget(self._loop_halve_btn)
+        loop_row.addWidget(self._loop_double_btn)
+        loop_row.addWidget(self._sync_btn)
 
         pitch_row = QHBoxLayout()
         pitch_row.addWidget(QLabel("Pitch"))
@@ -70,10 +106,12 @@ class DeckWidget(QWidget):
         pitch_row.addWidget(self._pitch_label)
 
         layout = QVBoxLayout(self)
+        layout.setSpacing(4)
         layout.addWidget(self._info_label)
         layout.addWidget(self.waveform, 1)
         layout.addWidget(self._progress_label)
         layout.addLayout(controls)
+        layout.addLayout(loop_row)
         layout.addLayout(pitch_row)
 
         # 信号转发（UI 只发指令）
@@ -83,6 +121,12 @@ class DeckWidget(QWidget):
         self._beatloop_btn.clicked.connect(lambda: self.beatloop_clicked.emit(4))
         self._keylock_cb.toggled.connect(self.keylock_toggled.emit)
         self._pitch_slider.valueChanged.connect(self._on_pitch_changed)
+        self._loop_in_btn.clicked.connect(self.loop_in_clicked.emit)
+        self._loop_out_btn.clicked.connect(self.loop_out_clicked.emit)
+        self._loop_4beat_btn.clicked.connect(self.loop_fourbeat_clicked.emit)
+        self._loop_halve_btn.clicked.connect(self.loop_halve_clicked.emit)
+        self._loop_double_btn.clicked.connect(self.loop_double_clicked.emit)
+        self._sync_btn.toggled.connect(self.sync_toggled.emit)
 
     # --- 状态更新（MainWindow 定时器/加载回调调用） ---
 
@@ -107,9 +151,26 @@ class DeckWidget(QWidget):
         self._play_btn.setText("暂停" if is_playing else "播放")
         self._play_btn.set_led(is_playing, _UI.get("glow_orange", "#ff7a2f"))
 
-    def _on_pitch_changed(self, value: int) -> None:
-        # Pitch 滑块变化：更新标签并发信号（百分比）
-        self._pitch_label.setText(f"Pitch {value:+d}%")
+    def set_pitch_display(self, percent: float) -> None:
+        # Pitch 滑块转为量程指示（J1.1：实时变速由 TEMPO 推子驱动，此滑块只读
+        # 反显当前乐速百分比；blockSignals 防回环；PL001.12 起为 FaderSlider）
+        percent = max(-8.0, min(8.0, float(percent)))
+        self._pitch_slider.blockSignals(True)
+        self._pitch_slider.set_value(percent)
+        self._pitch_slider.blockSignals(False)
+        self._pitch_label.setText(f"Pitch {percent:+.1f}%")
+
+    def set_sync_active(self, on: bool) -> None:
+        # 外部同步 SYNC 勾选与灯态（blockSignals 防回环，J1.0：手动 TEMPO 熄灭）
+        self._sync_btn.blockSignals(True)
+        self._sync_btn.setChecked(on)
+        self._sync_btn.blockSignals(False)
+        self._sync_btn.set_led(on, _UI.get("glow_blue", "#2f8bff"))
+
+    def _on_pitch_changed(self, value: float) -> None:
+        # Pitch 推子变化：更新标签并发信号（PL001.12 起 FaderSlider float 值；
+        # 主要作为 TEMPO 只读反显，手动拖动仍发信号由上层决定语义）
+        self._pitch_label.setText(f"Pitch {value:+.1f}%")
         self.pitch_changed.emit(float(value))
 
 
@@ -124,6 +185,9 @@ class DeckWidget(QWidget):
 #   update_progress(position, duration)：进度文本 + 播放头（H0.6 起采样率
 #     由 _SR = base.json sample_rate 换算，M:SS 显示）
 #   set_playing_state(is_playing)：按钮文案切换
+#   set_pitch_display(percent)：Pitch 量程只读反显（J1.1；PL001.12 起滑块为
+#     FaderSlider 拟物件，blockSignals 防回环）
+#   set_sync_active(on)：SYNC 勾选与灯态外部同步（J1.0）
 # 设计理由：控件零引擎依赖（信号解耦，B1"UI 只发指令"）；Pitch 用整数百分比滑块
 # 关联配置：config/static/ui.json（glow_orange 播放 LED 色）；
 #   config/static/base.json（sample_rate → _SR 进度换算，I3.4 补录）

@@ -8,12 +8,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
-from config.static.static_config import get_static_config
+from ui import palette
+from ui.palette import ThemeAware
 
-# 静态配置解包（波形颜色；I3.5：变量名 _SC.ui → _UI 与其余 UI 模块统一）
-_SC = get_static_config()
-_UI = _SC.ui
-_UI_COLORS = _UI.get("colors", {})
+# 波形配色（J2：paint 时经 palette 现取，主题切换自动换色）
 
 
 def _build_peaks(audio: np.ndarray, width: int) -> np.ndarray:
@@ -38,15 +36,16 @@ def _build_peaks(audio: np.ndarray, width: int) -> np.ndarray:
     return peaks
 
 
-class WaveformWidget(QWidget):
+class WaveformWidget(ThemeAware, QWidget):
     # 波形显示控件：set_audio 计算峰值缓存，set_position 移动播放头（100ms 定时刷新）
     def __init__(self, parent=None):
-        # 初始化：峰值缓存空、播放头 0、固定最小高度
+        # 初始化：峰值缓存空、播放头 0、固定最小高度；主题感知（J2）
         super().__init__(parent)
         self._peaks: np.ndarray = np.zeros((1, 2), dtype=np.float32)
         self._position: int = 0
         self._duration: int = 0
         self.setMinimumHeight(56)
+        self.bind_theme()  # J2
 
     def set_audio(self, audio: np.ndarray | None) -> None:
         # 载入音频：按当前控件宽度降采样峰值缓存；播放头清零
@@ -63,10 +62,10 @@ class WaveformWidget(QWidget):
             self.update()
 
     def paintEvent(self, event) -> None:
-        # 绘制：波形中线 + 上下包络 + 播放头竖线；空音频仅画边框
+        # 绘制：波形中线 + 上下包络 + 播放头竖线；空音频仅画边框（J2 palette 现取）
         painter = QPainter(self)
-        bg = QColor(str(_UI_COLORS.get("background", "#0d0d0d")))
-        fg = QColor(str(_UI_COLORS.get("accent", "#00ff41")))
+        bg = palette.color("background", "#0d0d0d")
+        fg = palette.color("accent", "#00ff41")
         painter.fillRect(self.rect(), bg)
         w, h = self.width(), self.height()
         mid = h / 2.0
@@ -88,14 +87,13 @@ class WaveformWidget(QWidget):
         # 播放头
         if self._duration > 0:
             px = int(self._position / self._duration * (w - 1))
-            painter.setPen(QPen(QColor(str(_UI_COLORS.get("deck_a", "#00cccc"))), 2))
+            painter.setPen(QPen(palette.color("deck_a", "#00cccc"), 2))
             painter.drawLine(px, 0, px, h - 1)
         painter.end()
 
 
 # ===== ui/waveform_widget.py 模块说明 =====
-# 模块级常量：
-#   _SC / _UI_COLORS：静态配置（波形颜色，AGENTS.md 参数约定）
+# 模块级常量：无（J2 起配色经 ui.palette 运行期现取，主题切换自动跟随）
 # 函数：
 #   _build_peaks(audio, width)：mono 直用 / 双通道均值（H0.3 支持 1D 输入）→
 #     每像素列 [min,max]（O(width) 峰值缓存，避免每帧全量扫描；短音频线性重采样）

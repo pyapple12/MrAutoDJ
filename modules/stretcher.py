@@ -256,6 +256,56 @@ def make_transition_buffer(
     )
 
 
+def make_tempo_buffer(
+    audio: np.ndarray,
+    rate: float,
+    semitones: float = 0.0,
+    sample_rate: int = 44100,
+    progress_callback: Callable[[float], None] | None = None,
+) -> np.ndarray:
+    # 恒速拉伸缓冲（J1.1 Keylock/Key Shift 重渲染）：整段按 rate 恒速映射
+    # （输出时长 = 原时长/rate），可选 --pitch 半音变调；rate≈1 且不变调时
+    # 快速路径直接返回拷贝（Keylock 开但原速的常见场景零开销）
+    if audio.ndim != 2 or audio.shape[1] != 2 or audio.shape[0] < 2:
+        raise ValueError(f"变速渲染需要≥2帧立体声输入，got shape {audio.shape}")
+    r = float(rate)
+    if not 0.05 <= r <= 20.0:
+        raise ValueError(f"变速比例超界 [0.05, 20]: {r}")
+    if abs(r - 1.0) < 1e-9 and semitones == 0:
+        return audio.copy()
+    n = audio.shape[0]
+    timemap = [
+        (1, max(1, int(round(1.0 / r)))),
+        (n - 1, max(2, int(round((n - 1) / r)))),
+    ]
+    if timemap[1][1] <= timemap[0][1]:
+        raise ValueError(f"变速比例过小无法构建 timemap：rate={r}")
+    total_duration_s = (n / r) / sample_rate
+    timemap_text = "\n".join(f"{in_f} {out_f}" for in_f, out_f in timemap) + "\n"
+
+    def _args(tmpdir: str) -> list[str]:
+        # 恒速 timemap + 输出时长（-D 必配）；--pitch 半音（Key Shift 同批渲染）
+        args = [
+            "--centre-focus",
+            "-M",
+            str(Path(tmpdir) / "timemap.txt"),
+            "-D",
+            f"{total_duration_s:.6f}",
+        ]
+        if semitones != 0:
+            args += ["--pitch", f"{semitones:.3f}"]
+        return args
+
+    return _render_via_cli(
+        audio,
+        sample_rate,
+        _args,
+        "mrautodj_tempo_",
+        progress_callback,
+        aux_files={"timemap.txt": timemap_text},
+    )
+
+
 def make_keylock_buffer(
     audio: np.ndarray,
     semitones: float,

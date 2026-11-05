@@ -1,6 +1,6 @@
 # MrAutoDJ —— 虚拟 DJ 台与 AI 电台
 
-[![Version](https://img.shields.io/badge/Version-ver%200.25-blue.svg)](config/static/base.json)
+[![Version](https://img.shields.io/badge/Version-0.2.6-blue.svg)](config/static/base.json)
 [![Python](https://img.shields.io/badge/Python-3.14+-green.svg)](https://www.python.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -52,6 +52,12 @@ GUI 基于 PySide6，音频引擎基于 python-sounddevice 实时回调，分析
   - QPainter 自绘拟物原语库（ui/widgets/）：RotaryKnob 旋钮 / FaderSlider 推子 / GlowButton 背光按钮 / LedStrip 灯柱 / MiniDisplay 小屏 / PanelFrame 面板
   - FLX4 五列布局：LIBRARY | DECK A | MIXER | DECK B | EFFECTS，深色金属面板 + 背光体系
   - 修复轮：Echo 回绕跳读、弯音归零、搓碟语义（平滑变速刮擦）
+- **虚拟控制台完善与外观层（M1.7，V0.2.6）**：
+  - 批次 0 UI 优化：布局/间距/尺寸全部配置化（ui.json）、部件大小分级、死控件灰显、数值 Tooltip、FX 状态小屏、快捷键（空格播放/Ctrl+F/Ctrl+T）
+  - 批次 1 功能补齐：TEMPO 实时变速（P4 闭环）、Keylock 变速不变调（rubberband 后台重渲染）、Key Shift 真实变调、Beat Sync、循环 IN/OUT/4BEAT/减半/加倍、Beat FX 拍数接线 + AUTO/TAP/CH 通道、耳机预听（CUE A/B）
+  - 批次 2 Theme 化：token 运行期动态化（ui/palette.py）、dark/light 双主题、Ctrl+T 无重启切换
+  - 批次 3 贴图 A 路线：程序化拉丝金属纹理 PNG 磁盘缓存（cache/ui_textures/，按主题/分辨率键控）
+  - 批次 4 大小缩放：ui_scale 全局缩放因子（控件/间距统一乘系数）
 - **AI 自动 DJ（M2）**：
   - 调和混音（Camelot 轮盘）选曲
   - 节拍对齐自动转场（EQ 渐变）
@@ -189,6 +195,10 @@ Pitch 变速与 Keylock（变调不变速）依赖 Rubber Band 变速引擎。�
 | `config/static/ui.json`     | `colors.*` / 阈值 / 表头                  | UI 外观与阈值              |
 
 修改 json 后重启应用生效（`get_static_config()` 缓存单例，进程内只读一次）。
+
+### 版本规范
+
+**版本双轨**（对齐系列项目规范）：机器版本唯一来源 = `config/static/base.json` 的 `version`（三段式 `X.Y.Z`，README 徽章随之即时推进）；commit 标题使用四段式 `VX.Y.Z.R`（前三段与 base.json 一致，第四段 R 为修订号，只随提交历史记录、不入配置文件）。`main.py --version` 打印 base.json 原值。
 
 ## 依赖
 

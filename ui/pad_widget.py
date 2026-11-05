@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWi
 
 from config.static.static_config import get_static_config
 from modules.engine import SLOT_COUNT
+from ui.scale import s
 from ui.widgets.glow_button import GlowButton
 
 # 静态配置解包（Pad 五模式色）
@@ -21,6 +22,18 @@ _PAD_COLORS = _UI.get(
 # 可软件实现的 Pad 模式（FLX4 模式键：HOT CUE / PAD FX1 / PAD FX2 / BEAT JUMP /
 # SAMPLER / KEYBOARD / BEAT LOOP / KEY SHIFT；此处取核心 5 种）
 PAD_MODES = ["Hot Cue", "Beat Loop", "Beat Jump", "Sampler", "Key Shift"]
+
+# 模式键显示短名（PL001.4：硬件贴纸式缩写防截断；信号/业务值恒用 PAD_MODES 原值）
+PAD_MODE_LABELS = {
+    "Hot Cue": "CUE",
+    "Beat Loop": "LOOP",
+    "Beat Jump": "JUMP",
+    "Sampler": "SMP",
+    "Key Shift": "KEY",
+}
+
+# Pad 键尺寸基准（J0.3：配置驱动，42×42 对齐 FLX4 手感；J4 实际尺寸乘 ui_scale）
+_PAD_SIZE_BASE = int(_UI.get("pad_btn_size", 42))
 
 
 class PadWidget(QWidget):
@@ -41,7 +54,7 @@ class PadWidget(QWidget):
             btn = GlowButton(f"P{i + 1}")
             # G0.5：pad 不使用勾选态（点按辉光由 isDown 驱动，业务灯态由
             # set_pad_light→set_led 驱动，防 isChecked 残留导致灯阵失真）
-            btn.setFixedSize(35, 35)
+            btn.setFixedSize(s(_PAD_SIZE_BASE), s(_PAD_SIZE_BASE))  # J4 缩放
             btn.clicked.connect(
                 lambda checked, idx=i: self.pad_clicked.emit(idx, self._mode)
             )
@@ -52,7 +65,8 @@ class PadWidget(QWidget):
         modes.addWidget(QLabel("模式"))
         self._mode_buttons = {}
         for name in PAD_MODES:
-            btn = GlowButton(name)
+            # PL001.4：显示文本用硬件短名（PAD_MODE_LABELS），业务值恒为 PAD_MODES 原值
+            btn = GlowButton(PAD_MODE_LABELS.get(name, name))
             btn.setCheckable(True)
             btn.clicked.connect(lambda checked, m=name: self._select_mode(m))
             modes.addWidget(btn)
@@ -108,6 +122,8 @@ class PadWidget(QWidget):
 # ===== ui/pad_widget.py 模块说明 =====
 # 模块级常量：
 #   PAD_MODES：可软件实现的 5 种 Pad 模式（Hot Cue/Beat Loop/Beat Jump/Sampler/Key Shift）
+#   PAD_MODE_LABELS：模式键显示短名（PL001.4：CUE/LOOP/JUMP/SMP/KEY，硬件贴纸式
+#     缩写防截断；信号/业务值恒用 PAD_MODES 原值，两层分离）
 #   _PAD_COLORS：五模式色（ui.json pad_colors）
 # 类型：
 #   PadWidget(QWidget)：打击垫组件

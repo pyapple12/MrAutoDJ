@@ -187,6 +187,9 @@ __marimo__/
 # opencode 项目级配置，含插件依赖
 .opencode/
 
+# Mimosa 安全扫描工作目录（扫描历史落仓库外，本目录为缓存/中间产物）
+.mimosa/
+
 # 归档与临时
 archived/
 .temp/

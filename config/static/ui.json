@@ -26,5 +26,39 @@
   "wheel_step_divisions": 20,
   "led_green_threshold": 0.6,
   "led_yellow_threshold": 0.85,
-  "led_segments": 12
+  "led_segments": 12,
+  "splitter_library_pct": 18,
+  "splitter_main_mins": [395, 200, 395, 280],
+  "splitter_main_shares": [0.375, 0.10, 0.375, 0.15],
+  "spacing_sm": 4,
+  "spacing_md": 8,
+  "spacing_lg": 12,
+  "button_min_width": 32,
+  "button_min_height": 32,
+  "knob_size_mixer": 32,
+  "knob_size_fx": 28,
+  "jog_size": 140,
+  "jog_size_min": 120,
+  "jog_size_max": 180,
+  "pad_btn_size": 42,
+  "ui_scale": 1.0,
+  "theme_light": {
+    "colors": {
+      "background": "#eef0f3",
+      "accent": "#0a7a2f",
+      "deck_a": "#0a7a8a",
+      "deck_b": "#8a7a00",
+      "warning": "#a86e00",
+      "danger": "#c22222"
+    },
+    "panel_base": "#e4e7ec",
+    "panel_edge": "#c6cad2",
+    "panel_inset": "#d2d6dd",
+    "silk_text": "#464c56",
+    "glow_orange": "#d95608",
+    "glow_blue": "#1558c8",
+    "glow_green": "#0a9a4a",
+    "glow_white": "#1c2026",
+    "pad_colors": ["#d95608", "#0088aa", "#0a9a4a", "#c22222", "#a86e00"]
+  }
 }

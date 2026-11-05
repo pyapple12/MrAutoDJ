@@ -7,11 +7,13 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QCheckBox, QVBoxLayout, QWidget
 
 from config.static.static_config import get_static_config
+from ui import palette
+from ui.palette import ThemeAware
+from ui.scale import s
 from ui.widgets._skins import metal_gradient, metal_pen
 
-# 静态配置解包（转盘颜色 + 弯音/搜索/搓碟灵敏度，参数一律走 ui.json）
+# 静态配置解包（转盘灵敏度；配色 J2 起 paint 时经 palette 现取）
 _SC = get_static_config()
-_UI_COLORS = _SC.ui.get("colors", {})
 _UI = _SC.ui
 
 # 滚轮/拖动灵敏度（样本数 / 单位；出厂值即合理默认，可在 ui.json 调整）
@@ -19,15 +21,16 @@ WHEEL_BEND_STEP = float(_UI.get("jog_bend_step", 0.05))  # 每格弯音速率（
 SEARCH_WHEEL_STEP = float(_UI.get("jog_search_step", 4.0))  # SHIFT+格 搜索速率
 SCRATCH_GAIN_BASE = float(_UI.get("jog_scratch_gain", 256))  # 搓碟基础每像素样本
 SCRATCH_SPEED_REF = float(_UI.get("jog_scratch_speed_ref", 800))  # px/s 参考速度
+# 转盘尺寸基准（J0.3：配置驱动，钳制 120-180；J4 实际尺寸在 __init__ 乘 ui_scale）
+_JOG_BASE = max(
+    int(_UI.get("jog_size_min", 120)),
+    min(int(_UI.get("jog_size_max", 180)), int(_UI.get("jog_size", 140))),
+)
 
-# 配色 token（G2.2：去硬编码）
-_GLOW_ORANGE = QColor(_UI.get("glow_orange", "#ff7a2f"))
-_GLOW_WHITE = QColor(_UI.get("glow_white", "#e8ecf0"))
-_SILK = QColor(_UI.get("silk_text", "#8a9099"))
-_PANEL_INSET = QColor(_UI.get("panel_inset", "#101215"))
+# 配色（G2.2 去硬编码；J2 起改 paint 时经 palette 现取）
 
 
-class JogWheel(QWidget):
+class JogWheel(ThemeAware, QWidget):
     # Jog 转盘：paintEvent 绘制圆盘；wheelEvent 弯音/搜索；鼠标拖动搓碟
     bend_changed = Signal(float)  # 弯音速率（±0.5）
     search_changed = Signal(float)  # 高速搜索速率（±16）
@@ -36,9 +39,10 @@ class JogWheel(QWidget):
     vinyl_toggled = Signal(bool)
 
     def __init__(self, parent=None):
-        # 初始化：尺寸、Vinyl 开关、触摸态、SHIFT 状态引用（MainWindow 注入）
+        # 初始化：尺寸（J0.3：ui.json jog_size 配置）、Vinyl 开关、触摸态、SHIFT 状态引用
         super().__init__(parent)
-        self.setFixedSize(140, 140)
+        self.setFixedSize(s(_JOG_BASE), s(_JOG_BASE))  # J4：基准 × ui_scale
+        self.bind_theme()  # J2：主题切换自动重绘
         self._vinyl = True
         self._touched = False
         self._last_pos: QPointF | None = None
@@ -52,7 +56,9 @@ class JogWheel(QWidget):
         self._vinyl_cb = QCheckBox("Vinyl")
         self._vinyl_cb.setChecked(True)
         self._vinyl_cb.toggled.connect(self._on_vinyl)
-        row.addWidget(self._vinyl_cb, alignment=Qt.AlignCenter)
+        row.addWidget(
+            self._vinyl_cb, alignment=Qt.AlignTop | Qt.AlignHCenter
+        )  # PL001.9：钉在顶部行（原 AlignCenter 垂直居中压中心屏）
 
     def set_shift_state(self, shift) -> None:
         # 注入全局 SHIFT 状态（MainWindow 调用）
@@ -134,44 +140,48 @@ class JogWheel(QWidget):
 
     def paintEvent(self, event) -> None:
         # 绘制圆盘：金属外圈（弯音区）+ 顶面（搓碟区）+ 中心屏文本 + 播放指示点
+        # （配色 paint 时经 palette 现取，J2 主题切换自动换色；PL001.9：圆盘绘制区
+        # 下移让出顶部 Vinyl checkbox 行，消除 "✓ Vinyl" 压中心屏叠字）
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
-        center = QPointF(w / 2, h / 2)
-        r_out = min(w, h) / 2 - 2
+        top = self._vinyl_cb.height() + 4  # checkbox 行高让位
+        cy = top + (h - top) / 2
+        center = QPointF(w / 2, cy)
+        r_out = min(w, h - top) / 2 - 2
         r_in = r_out * 0.66
-        bg = QColor(str(_UI_COLORS.get("background", "#0d0d0d")))
-        ring = QColor(str(_UI_COLORS.get("accent", "#00ff41")))
+        bg = palette.color("background", "#0d0d0d")
+        ring = palette.color("accent", "#00ff41")
         # 外圈金属渐变环（G1.2：公共皮肤渐变）
         painter.fillRect(self.rect(), bg)
         painter.setBrush(metal_gradient(0, 0, w, h))
         painter.setPen(metal_pen(2))  # H3.3：公共皮肤描边
         painter.drawEllipse(center, r_out, r_out)  # 金属外圈
         # 顶面（搓碟区）：深灰内盘 + 细分圆（G2.2：配色 token）
-        painter.setBrush(_PANEL_INSET)
+        painter.setBrush(palette.color("panel_inset", "#101215"))
         painter.setPen(QPen(ring, 2))
         painter.drawEllipse(center, r_in, r_in)
         painter.setPen(QPen(QColor(90, 94, 100), 1))
         painter.drawEllipse(center, r_in * 0.86, r_in * 0.86)
         # 播放指示点（顶部，播放时亮橙色）
         if self._playing:
-            painter.setBrush(_GLOW_ORANGE)
+            painter.setBrush(palette.color("glow_orange", "#ff7a2f"))
             painter.setPen(Qt.NoPen)
-            painter.drawEllipse(QPointF(w / 2, h / 2 - r_in * 0.72), 3, 3)
+            painter.drawEllipse(QPointF(w / 2, cy - r_in * 0.72), 3, 3)
         # 中心屏文本（BPM/位置）
-        painter.setPen(_GLOW_WHITE)
+        painter.setPen(palette.color("glow_white", "#e8ecf0"))
         font = painter.font()
         font.setBold(True)
         font.setPointSizeF(9)
         painter.setFont(font)
         painter.drawText(
-            QRectF(w / 2 - r_in * 0.7, h / 2 - 12, r_in * 1.4, 16),
+            QRectF(w / 2 - r_in * 0.7, cy - 12, r_in * 1.4, 16),
             Qt.AlignCenter,
             self._info_text or "JOG",
         )
-        painter.setPen(_SILK)
+        painter.setPen(palette.color("silk_text", "#8a9099"))
         painter.drawText(
-            QRectF(w / 2 - r_in * 0.7, h / 2 + 4, r_in * 1.4, 12),
+            QRectF(w / 2 - r_in * 0.7, cy + 4, r_in * 1.4, 12),
             Qt.AlignCenter,
             "VINYL" if self._vinyl else "CDJ",
         )
@@ -194,6 +204,8 @@ class JogWheel(QWidget):
 #   set_shift_state(shift)：注入全局 SHIFT（E2.1）
 #   set_playing(on)/set_info(text)：中心屏刷新（MainWindow _tick 驱动，F6.3）
 #   _scratch_gain(dx, dt)：速度映射增益（G2 标定）
+#   绘制（PL001.9）：圆盘绘制区下移让出顶部 Vinyl checkbox 行（圆心 y =
+#   checkbox 高 + 余量、半径随 (h-top) 收缩），消除 "✓ Vinyl" 压中心屏叠字
 #   wheelEvent/mousePressEvent/mouseMoveEvent/mouseReleaseEvent：事件分发
 # 设计理由：FLX4 交互（外圈滚轮=弯音、顶面按住拖动=搓碟）；
 #   组件零引擎依赖（信号解耦）；paintEvent 圆盘可视化（金属环+中心屏）

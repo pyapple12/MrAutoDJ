@@ -10,7 +10,11 @@ import numpy as np
 import sounddevice as sd
 
 from config.static.static_config import get_static_config
+from modules.stretcher import make_tempo_buffer, rubberband_available
 from utils.audio_decode import decode_audio
+from utils.logger import get_logger
+
+_logger = get_logger(__name__)
 
 # 静态配置解包（AGENTS.md 参数约定：采样率/块大小/通道数零硬编码）
 _SC = get_static_config()
@@ -53,6 +57,9 @@ FX_DELAY_DEPTH = [float(v) for v in _SC.base.get("fx_delay_depth", [0.2, 0.3])]
 
 # Key Shift 半音上限（H1.3：公开常量，transition_manager 引用，单处读键）
 KEY_SHIFT_MAX = int(_SC.base.get("key_shift_max", 12))
+
+# Keylock/Key Shift 重渲染去抖（J1.1：连续推 TEMPO/按 Pad 合并为最后一次渲染）
+REBIAS_DEBOUNCE_S = float(_SC.base.get("keylock_debounce_ms", 300)) / 1000.0
 
 
 class State(Enum):
@@ -379,7 +386,17 @@ class Deck:
         self._hot_cues: dict[int, int] = {}
         # 当前曲 BPM（Beat Jump/Tap 用；UI 加载曲目时设置）
         self._bpm: float = 0.0
-        # Key Shift 半音（±12，-12..0..+12；实际渲染由预渲染管线执行）
+        # TEMPO 乐速倍率（J1.1 P4：1.0=原速；Keylock 关=实时变速，开=经重渲染不变调）
+        self._tempo_rate: float = 1.0
+        # Keylock（变速不变调）与重渲染烘焙域：_baked_rate/_baked_semitones 为
+        # 当前 _now_audio 已烘焙的拉伸/变调参数（fill 速率因子 = tempo_rate/baked_rate）
+        self._keylock_on: bool = False
+        self._baked_rate: float = 1.0
+        self._baked_semitones: int = 0
+        self._orig_audio: np.ndarray | None = None  # 原始缓冲（重渲染基准）
+        self._rebias_epoch: int = 0  # 重渲染请求代次（新请求取代旧结果）
+        self._rebias_timer: threading.Timer | None = None
+        # Key Shift 半音（±12，-12..0..+12；经 rubberband 重渲染真实变调，J1.1）
         self._key_shift: int = 0
         # Jog：触摸态 / 弯音速率（±0.5）/ 高速搜索速率（含符号，±16 倍）
         self._jog_touched: bool = False
@@ -399,19 +416,28 @@ class Deck:
         self._reverse: bool = False
         # Trans 门控相位（跨块持续）
         self._trans_phase: int = 0
+        # Beat FX 拍数（J1.1：Echo/Delay 延迟 = beats/4 拍、Trans 门控周期，BPM 驱动）
+        self._fx_beats: int = 4
 
     # --- 传输控制 ---
 
     def play(self, audio: np.ndarray) -> None:
-        # 从头播放整段音频（清状态/CUE 保持/循环关闭/EQ 状态清零）
+        # 从头播放整段音频（清状态/CUE 保持/循环关闭/EQ 状态清零；
+        # 重置烘焙域与乐速——新曲从原始缓冲开始，J1.1）
         with self._lock:
             self._now_audio = audio
+            self._orig_audio = audio
             self._position = 0
             self._paused = False
             self.state = State.PLAYING
             self._pending_mix_at = None
             self._next_audio = None
             self._loop_active = False
+            self._tempo_rate = 1.0
+            self._baked_rate = 1.0
+            self._baked_semitones = 0
+            self._scratch_fpos = 0.0
+            self._scratch_pending = 0
             self.eq.reset()
 
     def pause(self) -> None:
@@ -504,9 +530,11 @@ class Deck:
     # --- E1.2 Beatgrid 跳转 ---
 
     def set_tempo(self, bpm: float) -> None:
-        # 设置当前曲 BPM（Beat Jump/Tap 计算用；UI 加载曲目时调用）
+        # 设置当前曲 BPM（Beat Jump/Tap 计算用；UI 加载曲目时调用；
+        # BPM 变化联动 Beat FX 延迟重配，J1.1）
         with self._lock:
             self._bpm = max(0.0, float(bpm))
+            self._apply_fx_delay_locked()
 
     @property
     def bpm(self) -> float:
@@ -514,9 +542,116 @@ class Deck:
         with self._lock:
             return self._bpm
 
+    @property
+    def tempo_rate(self) -> float:
+        # 当前乐速倍率（Beat Sync 计算/显示用，J1.0）
+        with self._lock:
+            return self._tempo_rate
+
+    @property
+    def effective_bpm(self) -> float:
+        # 有效 BPM = 曲目 BPM × 乐速倍率（Beat Sync 目标值，J1.0）
+        with self._lock:
+            return self._bpm * self._tempo_rate
+
+    def set_tempo_rate(self, rate: float) -> None:
+        # 设置乐速倍率（TEMPO 推子，P4/J1.1）：Keylock 关 = 实时变速（弯音同路线，
+        # 音高随速变化）；Keylock 开 = 触发 rubberband 重渲染烘焙（不变调），
+        # 去抖合并连续变化
+        with self._lock:
+            self._tempo_rate = max(0.1, min(2.0, float(rate)))
+            target = (self._tempo_rate if self._keylock_on else 1.0, self._key_shift)
+        self._maybe_rebias(target)
+
+    def set_keylock(self, on: bool) -> None:
+        # Keylock 开关（J1.1）：开 = 乐速变化走重渲染（变速不变调）；
+        # 关 = 回实时变速路线（已烘焙的拉伸卸载回原速域）
+        with self._lock:
+            self._keylock_on = bool(on)
+            target = (self._tempo_rate if self._keylock_on else 1.0, self._key_shift)
+        self._maybe_rebias(target)
+
+    # --- J1.1 重渲染（Keylock/Key Shift 烘焙） ---
+
+    def _maybe_rebias(self, target: tuple[float, int]) -> None:
+        # 目标烘焙态与当前一致则跳过；否则去抖调度后台重渲染
+        # （rubberband 渲染 ~1-2s，连续推 TEMPO/连打 Pad 合并为最后一次）
+        if target == (self._baked_rate, self._baked_semitones):
+            return
+        if not rubberband_available():
+            _logger.warning("rubberband 不可用：Keylock/Key Shift 保持实时变速路线")
+            return
+        timer = self._rebias_timer
+        if timer is not None:
+            timer.cancel()
+        self._rebias_timer = threading.Timer(REBIAS_DEBOUNCE_S, self._apply_rebias)
+        self._rebias_timer.daemon = True
+        self._rebias_timer.start()
+
+    def _apply_rebias(self) -> None:
+        # 后台重渲染（worker 线程，允许 IO）：从原始缓冲渲染目标 (rate, 半音) →
+        # epoch 校验 + MIXING 让路（短暂重试）→ 锁内换缓冲并重映射位置域
+        with self._lock:
+            if self._orig_audio is None:
+                return
+            target_rate = self._tempo_rate if self._keylock_on else 1.0
+            target_shift = self._key_shift
+            if (target_rate, target_shift) == (self._baked_rate, self._baked_semitones):
+                return
+            self._rebias_epoch += 1
+            my_epoch = self._rebias_epoch
+        try:
+            buf = make_tempo_buffer(
+                self._orig_audio,
+                target_rate,
+                semitones=float(target_shift),
+                sample_rate=self.sr,
+            )
+        except Exception:
+            # fail-soft：渲染失败保持当前缓冲（可能仍处于旧烘焙态），绝不崩溃
+            _logger.warning("Keylock/Key Shift 重渲染失败（保持当前缓冲）", exc_info=True)
+            return
+        deadline = time.monotonic() + 10.0
+        while True:
+            with self._lock:
+                if self._rebias_epoch != my_epoch:
+                    return  # 已被新请求取代
+                if self.state != State.MIXING:
+                    break
+            # MIXING 中换缓冲会破坏 _mix_pos 域映射——短暂等待淡出结束（上限 10s）
+            if time.monotonic() > deadline:
+                _logger.warning("重渲染换缓冲超时（MIXING 未结束），放弃本次应用")
+                return
+            time.sleep(0.1)
+        with self._lock:
+            if self._rebias_epoch != my_epoch:
+                return
+            if (target_rate, self._key_shift) != (target_rate, target_shift):
+                return  # 渲染期间参数又变
+            self._swap_buffer(buf, target_rate, target_shift)
+
+    def _swap_buffer(self, new_audio: np.ndarray, rate: float, semitones: int) -> None:
+        # 锁内换烘焙缓冲并重映射全部位置域（cue/hot cue/loop/slip/搓碟按拉伸比换算；
+        # Key Shift 不改时长 factor=1 无损）
+        factor = rate / self._baked_rate if self._baked_rate > 0 else 1.0
+        self._now_audio = new_audio
+        self._baked_rate = rate
+        self._baked_semitones = semitones
+        if factor != 1.0:
+            self._position = int(self._position * factor)
+            self._cue_sample = int(self._cue_sample * factor)
+            self._hot_cues = {k: int(v * factor) for k, v in self._hot_cues.items()}
+            self._loop_start = int(self._loop_start * factor)
+            self._loop_end = int(self._loop_end * factor)
+            self._slip_actual = int(self._slip_actual * factor)
+            self._scratch_fpos *= factor
+            self._scratch_pending = int(self._scratch_pending * factor)
+        self._position = max(0, min(self._position, len(new_audio)))
+
     def _beat_len(self, bpm: float) -> int:
-        # 拍长换算（样本数）：60/bpm×sr（G1.3：beat_jump/set_beatloop 共用）
-        return int(60.0 / bpm * self.sr)
+        # 拍长换算（样本数）：60/bpm×sr×烘焙拉伸比（G1.3 共用；J1.1 乘 _baked_rate
+        # 使 beat_jump/set_beatloop 在 Keylock 烘焙域内仍按乐理拍长计算）
+        return int(60.0 / bpm * self.sr * self._baked_rate)
 
     def beat_jump(self, beats: int, align: bool = False) -> None:
         # 按拍跳转：±beats 拍；align=True（Skip 模式）时先对齐最近拍边界
@@ -532,9 +667,12 @@ class Deck:
     # --- E1.3 Key Shift 半音 ---
 
     def set_key_shift(self, semitones: int) -> None:
-        # 设置 Key Shift（钳制 ±key_shift_max；仅存状态，实际变调渲染由预渲染管线执行）
+        # 设置 Key Shift（钳制 ±key_shift_max；J1.1 真实变调：经 rubberband 重渲染
+        # 烘焙 --pitch，时长不变故位置域无需换算，去抖合并连打）
         with self._lock:
             self._key_shift = max(-KEY_SHIFT_MAX, min(KEY_SHIFT_MAX, int(semitones)))
+            target = (self._tempo_rate if self._keylock_on else 1.0, self._key_shift)
+        self._maybe_rebias(target)
 
     @property
     def key_shift(self) -> int:
@@ -589,6 +727,12 @@ class Deck:
     def slip_active(self) -> bool:
         # Slip 状态（UI 灯态）
         return self._slip_active
+
+    @property
+    def loop_active(self) -> bool:
+        # 循环激活状态（UI 提示用，J1.0）
+        with self._lock:
+            return self._loop_active
 
     # --- E1.7 Sampler 槽位 ---
 
@@ -697,6 +841,45 @@ class Deck:
             self._loop_end = int(end_seconds * self.sr)
             self._loop_active = True
 
+    def loop_in(self) -> None:
+        # 循环入点（J1.0 FLX4 LOOP IN）：当前位置为起点，暂不激活（等 OUT 闭合）
+        with self._lock:
+            if self._now_audio is not None:
+                self._loop_start = self._position
+                self._loop_end = len(self._now_audio)
+                self._loop_active = False
+
+    def loop_out(self) -> None:
+        # 循环出点（J1.0 FLX4 LOOP OUT）：当前位置为终点并激活循环（需先 IN）
+        with self._lock:
+            if self._now_audio is not None and self._loop_start < self._position:
+                self._loop_end = self._position
+                self._loop_active = True
+
+    def loop_halve(self) -> None:
+        # 循环长度减半（J1.0 CALL ◀ 语义：减半）
+        with self._lock:
+            length = self._loop_end - self._loop_start
+            if length >= 2:
+                self._loop_end = self._loop_start + length // 2
+
+    def loop_double(self) -> None:
+        # 循环长度加倍（J1.0 CALL ▶ 语义：加倍，钳制曲尾）
+        with self._lock:
+            if self._now_audio is not None:
+                length = self._loop_end - self._loop_start
+                self._loop_end = min(
+                    len(self._now_audio), self._loop_start + length * 2
+                )
+
+    def cue_buffer(self) -> np.ndarray | None:
+        # 耳机预听缓冲（J1.0：当前位置到曲尾的切片视图；切片共享底层内存，
+        # 后续烘焙换缓冲也不影响已取出的视图）
+        with self._lock:
+            if self._now_audio is None:
+                return None
+            return self._now_audio[self._position :]
+
     # --- 混音（D2.5） ---
 
     def start_mix(
@@ -785,11 +968,13 @@ class Deck:
                 self._fill_mixing(out[frames_before:], frames_after)
             return
 
-        # Censor：反向播放（按住期间）；到曲头保持反向停留（I0.3：原在此清除
-        # _reverse，按住越过曲头后永久恢复正向，与"按住期间反向"语义不符——
-        # 仅 censor(False) 释放时恢复正向）
+        # 乐速因子（J1.1）：烘焙域 → 乐速的换算比（Keylock 烘焙后 fill 恒 1.0；
+        # 实时变速 >1 加速 <1 减速，音高随速变化 = 黑胶语义）
+        factor = self._tempo_rate / self._baked_rate if self._baked_rate > 0 else 1.0
+
+        # Censor：反向播放（按住期间）；到曲头保持反向停留（I0.3）；反向速度随乐速
         if self._reverse:
-            self._position -= frames
+            self._position -= max(1, int(frames * factor))
             if self._position <= 0:
                 self._position = 0
             out[:] = self._get_chunk_reverse(frames)
@@ -817,10 +1002,10 @@ class Deck:
             self._mix_sample(out)
             return
 
-        # 步长：高速搜索 > 弯音 > 原速
+        # 步长：高速搜索 > 弯音×乐速 > 乐速 > 原速
         if self._jog_search_rate != 0.0:
             # I0.2：step 钳制 ≥1（|rate|<0.000244 时原 step==0 → _fill_resample
-            # 空数组负索引 IndexError 静音卡死）
+            # 空数组负索引 IndexError 静音卡死）；搜索为绝对速率（不乘乐速）
             step = max(1, int(round(frames * abs(self._jog_search_rate))))
             if self._jog_search_rate < 0:
                 self._position = max(0, self._position - step)
@@ -834,8 +1019,8 @@ class Deck:
                 self.state = State.IDLE
             return
         elif self._jog_bend_rate != 0.0:
-            # I0.2：step 钳制 ≥1（frames=1 且 bend=-0.5 极端时 round 可为 0）
-            step = max(1, int(round(frames * (1.0 + self._jog_bend_rate))))
+            # I0.2：step 钳制 ≥1；弯音乘乐速因子（J1.1，烘焙域内合成）
+            step = max(1, int(round(frames * factor * (1.0 + self._jog_bend_rate))))
             self._fill_resample(out, frames, step)
             self._position += step
             # Sampler 叠加（在 EQ 前混入采样）
@@ -843,9 +1028,16 @@ class Deck:
             if not self._loop_active and self._position >= len(self._now_audio):
                 self.state = State.IDLE
             return
+        elif factor != 1.0:
+            # J1.1 P4：TEMPO 实时变速（插值填充，音高随速变化）
+            step = max(1, int(round(frames * factor)))
+            self._fill_resample(out, frames, step)
+            self._position += step
+            self._mix_sample(out)
+            if not self._loop_active and self._position >= len(self._now_audio):
+                self.state = State.IDLE
+            return
 
-        # I3.2：恒 False 分支删除（原 step 与 frames 的比较分支不可达——搜索/弯音
-        # 已提前返回，此处恒原速）——I3.5 的 _fill_resample 死分支同指此处
         out[:] = self._get_chunk(frames)
         self._position += frames
 
@@ -1015,6 +1207,7 @@ class Deck:
                 self._fx_delay.configure(
                     float(ECHO_PRESET.get("delay", 0.25)), base + slope * depth
                 )
+                self._apply_fx_delay_locked()
             elif effect == "Delay":
                 base, slope = FX_DELAY_DEPTH
                 self._fx_delay.configure(
@@ -1022,6 +1215,31 @@ class Deck:
                     base + slope * depth,
                     n_taps=int(DELAY_PRESET.get("taps", 3)),
                 )
+                self._apply_fx_delay_locked()
+
+    def set_fx_beats(self, beats: int) -> None:
+        # Beat FX 拍数（J1.1）：Echo/Delay 延迟 = beats/4 拍（BPM 驱动）、
+        # Trans 门控周期同步；BPM 未知时保持预置延迟
+        with self._lock:
+            self._fx_beats = max(1, min(32, int(beats)))
+            self._apply_fx_delay_locked()
+
+    def _apply_fx_delay_locked(self) -> None:
+        # 锁内：按 BPM×拍数重配 Echo/Delay 延迟（须已持锁；BPM 未知/效果未开跳过）
+        if self._fx_effect not in ("Echo", "Delay") or self._bpm <= 0:
+            return
+        delay = 60.0 / self._bpm * self._fx_beats / 4.0
+        if self._fx_effect == "Echo":
+            base, slope = FX_ECHO_DEPTH
+            preset = ECHO_PRESET
+        else:
+            base, slope = FX_DELAY_DEPTH
+            preset = DELAY_PRESET
+        self._fx_delay.configure(
+            min(delay, 1.9),  # 钳制缓冲上限（2.0s）内
+            base + slope * self._fx_depth,
+            n_taps=int(preset.get("taps", 1)),
+        )
 
     def _apply_fx(self, out: np.ndarray) -> None:
         # Beat FX 执行（回调内；depth=0 旁通）
@@ -1033,17 +1251,16 @@ class Deck:
         elif effect in ("Echo", "Delay"):
             self._fx_delay.process(out, len(out))
         elif effect == "Trans" and self._bpm > 0:
-            # 节拍门控：50% 占空比，随 depth 变密（1/4 → 1/32 阶梯）
-            div = FX_TRANS_LADDER[min(4, int(self._fx_depth * 5))]
-            if div > 0:
-                beat = self.sr * 60.0 / self._bpm
-                period = max(2.0, beat * 4.0 / div)
-                n = len(out)
-                phase = np.arange(0, n, dtype=np.float64)
-                pos = np.mod(phase + self._trans_phase, period)
-                gain = np.where(pos < period * 0.5, 1.0, 0.0).astype(np.float32)
-                out *= gain[:, None]
-                self._trans_phase = int((self._trans_phase + n) % (period * 64))
+            # 节拍门控：50% 占空比；周期 = beats/4 拍（J1.1 拍数接线，
+            # BPM 未知时退回深度阶梯 FX_TRANS_LADDER）
+            beat = self.sr * 60.0 / self._bpm
+            period = max(2.0, beat * self._fx_beats / 4.0)
+            n = len(out)
+            phase = np.arange(0, n, dtype=np.float64)
+            pos = np.mod(phase + self._trans_phase, period)
+            gain = np.where(pos < period * 0.5, 1.0, 0.0).astype(np.float32)
+            out *= gain[:, None]
+            self._trans_phase = int((self._trans_phase + n) % (period * 64))
 
 
 # ---------------------------------------------------------------------------
@@ -1098,6 +1315,9 @@ class AudioEngine:
         # --- E1.9 通道推子与 Fader Start ---
         self._ch_fader = [1.0, 1.0]
         self._fader_start = False
+        # --- J1.0 耳机监听（CuePlayer 惰性创建：默认输出设备，失败降级 None） ---
+        self._cue_player: CuePlayer | None = None
+        self._cue_failed = False
         self._stream = sd.OutputStream(
             device=device,
             samplerate=SAMPLE_RATE,
@@ -1144,6 +1364,17 @@ class AudioEngine:
         # 开关 Fader Start 模式（推子从 0 推起=播放、拉到底=停止）
         with self._lock:
             self._fader_start = bool(enabled)
+
+    def ensure_cue_player(self) -> "CuePlayer | None":
+        # 耳机监听惰性创建（J1.0）：首次调用时开独立输出流（默认设备）；
+        # 创建失败置 _cue_failed 不再重试，返回 None 由 UI 提示
+        if self._cue_player is None and not self._cue_failed:
+            try:
+                self._cue_player = CuePlayer(device=None)
+            except Exception:
+                self._cue_failed = True
+                _logger.warning("耳机监听流创建失败（监听功能不可用）", exc_info=True)
+        return self._cue_player
 
     # --- 主音量（D2.9） ---
 

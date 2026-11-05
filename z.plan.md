@@ -1,5 +1,7 @@
 # 开源 DJ 软件调研报告
 
+> **文件职责与编号轨道**（2026-11-05 对齐 CapsulePulse）：本文件 = 调研存档 + 项目总体规划（里程碑表）+ 方案与审计归档（附录）。既有里程碑编号（M1/M1.5/M1.6/M1.7/M2/M3）与附录编号（A001/A002/A003）**原样保留、只增不删**；自此起新立方案按 AGENTS.md 任务清单纪律走三线轨道——功能里程碑入**附录 `PL{NNN}`**、小修小改入**附录 `PATCH{NNN}`**、审计报告入**附录 `A{NNN}`**（与 x.progress.md 的 `FIX{NNN}` 恒同号），立项时创建附录、收口时在对应清单节回写一行索引。
+
 - 调研日期：2026-08-09
 - 数据来源：GitHub 搜索 API（关键词：dj / djing / dj-software / dj-mixer / xwax / open-source dj app / web dj mixer 等）
 - 筛选标准：近 3 年（2023-08 之后）仍有更新（push），且为真实开源项目
@@ -237,7 +239,7 @@ MrAutoDJ：从虚拟 DJ 台起步，逐步演进为 AI 自动 DJ 与 LLM 电台�
     - Step 4：Jog 转盘视觉升级 + Pad/Beat FX 背光化
     - Step 5：全量替换 + 无头初始化验证 + 截图定稿；提交（Git 拆分由用户决定）
   - [x] 集成验证：无头初始化 + 无头截图 + 冒烟；GUI 实测核对背光/灯态交互
-- [ ] **M1.7 虚拟控制台完善与外观层**（V0.25+，方案 2026-08-13 定稿；详细方案见"附录：虚拟控制台完善与外观层工作计划"）
+- [x] **M1.7 虚拟控制台完善与外观层**（V0.2.6，方案 2026-08-13 定稿；任务清单 J 系列见 x.progress.md——**批次 0-4 全部完成（2026-11-05）**：UI 优化配置化 → 功能补齐（实时变速/Keylock/Key Shift 重渲染/Sync/循环键/FX 拍数/监听）→ Theme 化（dark/light 运行期切换 Ctrl+T）→ 贴图 A 路线（程序化 PNG 缓存）→ 全局缩放 ui_scale；21/21 探针 PASS + 双主题截图读图核对；目测项按用户授权闭环，提交由用户执行）
   > 定位：在 M1.6 基础上完善虚拟 DJ 控制台——先优化现有 UI（位置/大小/功能显性化），再补齐 FLX4 缺件与未实现按键行为，随后做外观层（Theme/贴图/缩放）；置于 M2 之前（虚拟台完善后再推进 AI 自动 DJ）
   - [ ] **批次 0：UI 优化（前置）**——四区布局/比例进配置、响应式重排、间距网格统一；部件位置按 FLX4 语义（TEMPO 竖置位、耳机区预留、Pad 布局核对）；部件大小分级（按钮 ≥32/旋钮分级/Jog 120-180/Pad 42）；死控件灰显、占位功能提示、操作反馈与状态显性化；Tooltip/Tab 顺序/快捷键
   - [ ] **批次 1：功能补齐**——补缺件（Beat Sync/主盘、TEMPO 推子+量程、Loop IN/OUT/4BEAT/CALL◀▶、耳机监听区、Key Shift 真实变调、Pad 剩余模式远期）；补未实现行为（Pitch 实时变速 P4、Keylock 变速不变调、Key Shift 变调、Beat FX beats 接线）；与 I 系列（A003 22 项）合并执行；全量测试
@@ -633,3 +635,63 @@ B 中等（原语控件"固定尺寸"改"scale×基准"）；与批次 2（主�
 ### 三、亮点
 
 H 系列 19 项修复在位（除 H0.1 漏改）；配置键 40 个与读取方对齐无死键；文档一致性全过（README 徽章==base.json==git V0.24、x.progress 编号连续、y.problem 状态真实）；锁语义/import 循环无风险；transition.py 无问题。
+
+---
+
+## 附录 PL001：UI 评审修复（截断与列宽 / 面板补丁 / 激活态层级）
+
+> 立项：2026-11-05。来源 = taste-skill（app-screens 模式）UI 评审报告（评审素材 `.temp/ui_preview/review/`，before 截图已存档）；评审结论 overall 6.0（design 5.5 / usability 5.5 / creativity 7.5 / content 7），Top3 问题：①文字大面积截断+曲库列塌缩 ②QSS 全局背景在拟物面板上打黑/白补丁+无内容色块+VU 空态不可见 ③激活态层级失衡（FX ON 白光抢主操作/效果键选中色不一致/Pitch 原生滑块）。
+> 定位：纯 UI 层修复（themes/widgets/main_window/deck_widget/beat_fx_widget/pad_widget），引擎与业务逻辑零改动；评审"硬件拟物"设计意图保留（金属/辉光/渐变不属违规项），只修可用性硬伤与一致性。
+> 状态：✅ **已实施**（2026-11-05，任务组 PL001 见 x.progress.md——16/16 条勾结；probe_pl001 全 PASS + 22/22 探针回归 + 冒烟 OK；after 截图 dark/light×3 特写目检全过（截断清零/色块消失/VU 框架可见/Jog 无叠字/FX ON 描边激活/空态引导）；执行中升级两处根因——GlowButton 无 sizeHint 覆写（截断源头）与五列最小宽超主区（Pad 全宽化 + mins+shares 机制解决）；遗留 PanelFrame 标题重叠记 y.problem#P5。提交 V0.2.6.1 由用户执行）
+
+### 一、目标
+
+1. **可读性**：1650×800 默认窗宽下全部按钮文本完整可读，曲库列保持 ≥260px 不塌缩
+2. **面板一致性**：拟物纹理面板无黑/白补丁色块；VU 未亮段在暗面板上可见（空态保留框架）
+3. **激活态纪律**：主操作唯一（Mix Now 唯一橙色实心）；效果键选中恒橙光；Pitch 滑块归入拟物体系
+4. **空态引导**：空曲库有一句引导（empty keeps frame + 一句话，app-screens §11 first run 规则）
+
+### 二、措施（四组，文件/函数级）
+
+#### 组 A：截断与列宽（对应评审 Top3-1）
+
+- **A1 splitter 列宽下限与比例重申**——`ui/main_window.py _build_ui()`：四处面板 `setMinimumWidth`（曲库 260 / deck 420 / mixer 230 / effects 250）；`show()` 后比例被子控件 sizeHint 重算覆盖是曲库塌缩根因，补 `QTimer.singleShot(0, self._apply_splitter_sizes)`（新方法，集中 body/main 两级 `setSizes` 调用，构造与 show 后各执行一次）
+- **A2 GlowButton 文本自适应**——`ui/widgets/glow_button.py paintEvent()`：elide 前先按 `QFontMetrics.horizontalAdvance(text)` 与可用宽（rect.width()-6）比较，超宽则字号降一档（painter 字体 pointSize -1，最低到 8）再 elide——文本优先可读，tooltip 已有全名兜底
+- **A3 BeatFxWidget 两行布局**——`ui/beat_fx_widget.py __init__()`：row1 拆为 `fx_row`（FX 标签+效果 5 键）与 `ch_row`（CH1/CH2/1+2 独立一行）；`AUTO` 按钮文本不再被挤（row2 的 AUTO/TAP 保持右置）
+- **A4 Pad 模式键短名**——`ui/pad_widget.py`：`PAD_MODES` 拆为业务值与显示文本两层（`PAD_MODES` 信号值不变，新增 `PAD_MODE_LABELS = {"Beat Loop": "LOOP", "Beat Jump": "JUMP", "Key Shift": "KEY", ...}`），模式键构造用 LABELS，`_select_mode`/`_apply_mode_color` 按 PAD_MODES 逻辑不变
+- **A5 Mixer/PHONES 按钮短名**——`ui/main_window.py _build_mixer_panel()`：FaderStart 键文本 `{label} FS`、Tap 键 `TAP`（label 前缀 A/B 保留）；PHONES 两键 `CUE A`→`CA`、`CUE B`→`CB`（tooltip 全名已存在不改）
+
+#### 组 B：拟物面板补丁与状态诚实（对应评审 Top3-2）
+
+- **B1 QSS 背景作用域改造**——`ui/themes.py _build_qss()`：删除 `QMainWindow, QWidget { background: {bg}; ... }` 全局实底规则，改为全局 `QWidget { background: transparent; color: {fg}; }` + 定点实底（`QTableWidget`/`QLineEdit`/`QStatusBar`/`QMainWindow` 保留 bg）；QLabel/QContainer 随全局透明——PanelFrame 拉丝纹理在全部标签后透出，黑/白补丁消失。回归点：QTableWidget/QLineEdit 实底必须在（浅色主题下表格可读）
+- **B2 Mixer 残留色块定位与清除**——B1 落地后重截 zoom_mixer：若 EQ 标签下 90×70 / 横推旁 120×200 色块仍残留，写 `.temp/probe_block.py` 给可疑容器 setStyleSheet 临时描边逐个排除（候选：row2 列 QVBoxLayout 拉伸的 QLabel、xf_col 的横推标签被 row4 stretch 拉高）；定位后修复（横推标签改 `xf_col.addWidget(QLabel, 0, Qt.AlignHCenter)` + 固定行高， QLabel 拉伸属 QSS 透明后自愈项）
+- **B3 LedStrip 未亮段可见**——`ui/widgets/led_strip.py _segment_color()`：未亮分支从 `panel_inset` 改 `panel_edge` 并在段顶加 1px 6% 白描边（paintEvent 段矩形上缘 drawLine）——暗面板上灯柱框架可见（"空态保留框架"）
+- **B4 Jog 中心屏重叠修复**——`ui/jog_wheel.py __init__()/paintEvent()`：Vinyl checkbox 从覆盖式布局改独立行——圆盘绘制区域下移（paintEvent 圆心 y += checkbox 高/2，半径同步收缩）或 checkbox 移到 Jog 底部（圆上方留 18px 头部行）；消除 "✓ Vinyl" 压 "---- BPM" 的叠字
+
+#### 组 C：激活态层级（对应评审 Top3-3）
+
+- **C1 效果键初始橙光**——`ui/beat_fx_widget.py __init__()` 末尾：构造 `setChecked(True)` 后补调 `self._select_fx("HPF")`（统一走现有选中路径，初始即橙光，与点击后一致）
+- **C2 激活辉光分档**——`ui/widgets/glow_button.py paintEvent()`：`isChecked()`（非按压）态辉光半径 ×0.85、外圈 alpha 220→150（按压/LED 常亮态维持现强度）；`ui/beat_fx_widget.py` 的 FX ON 改"描边激活"——新参数或 set_led 语义扩展：checked 时画 1.5px led 色圆角描边 + 文字亮色，不整面辉光——主操作唯一性还给 Mix Now（橙色实心）
+- **C3 Pitch 滑块拟物化**——`ui/deck_widget.py __init__()/set_pitch_display()`：`QSlider` → 复用 `ui/widgets/fader_slider.py` 的 `FaderSlider(-8, 8, 0, Qt.Horizontal, length=200)`；`set_pitch_display` 改 `set_value` + blockSignals（防 pitch_changed 回环）；`_on_pitch_changed` 保留（手动拖动仍发信号，main_window `_on_pitch` 提示语义不变）；QSS 的 QSlider 规则随之可删（themes.py 清理）
+
+#### 组 D：空态与 light 微调
+
+- **D1 空曲库引导**——`ui/main_window.py _build_ui()`：曲库 PanelFrame 内表格上加一句 QLabel（`Qt.AlignCenter`，silk 色 12px）"打开文件夹加载曲库 · 双击曲目加载到目标盘"，`load_library()` 有行后 `setVisible(False)`；"empty keeps frame + 一句话"（app-screens §11）
+- **D2 light 辉光降档**——`ui/widgets/glow_button.py paintEvent()`：辉光 alpha 系数按 `palette.current()` 分档（dark 220 / light 150，中心 110/70）——浅底光晕不发脏；读 palette 而非硬编码（palette 已有 current() 接口）
+
+### 三、验证方案
+
+1. **探针** `.temp/probe_pl001.py`（TDD：先 FAIL 后 PASS）：
+   - 截断断言：对 LOAD A/B、FX 5 键、CH 3 键、模式 5 键、FaderStart/Tap、PHONES 2 键逐个断言 `btn.fontMetrics().horizontalAdvance(text) <= btn.width()-6`（文本完整放下，无省略号）——修复前 FAIL
+   - 列宽断言：1650×800 show 后 `library_panel.width() >= 260`
+   - 一致性断言：效果键初始 `_led_color == QColor(glow_orange)`；QSS 无 `QWidget { background: {bg}` 全局规则；LedStrip 未亮段色 == panel_edge；deck_widget Pitch 是 FaderSlider 实例
+   - 渲染断言：dark/light 双主题全窗 grab 不崩
+2. **截图对比**：重跑 `.temp/review_shots.py` 输出 after 组（dark 空载/加载、light 加载、三特写），与 before（同目录现存）逐项目检——截断清零、无色块、VU 框架可见、Jog 中心屏无叠字、FX ON 描边态
+3. **全量回归**：既有 21 探针全 PASS（重点 p5/p6 布局与交互断言、j0 尺寸断言——A2-A5 改按钮文本/宽度可能触碰 p6 文本断言，同步更新）+ 冒烟 import
+4. **验收**：GUI 实测（用户）——可读性/层级/空态引导逐项复核
+
+### 四、范围与不做的事
+
+- 不动引擎/modules 层；不改配色 token 值本身（light/dark token 表不动，只改透明度分档）；不改交互逻辑与信号（A4 显示文本与业务值分离）；Splitter 响应式重排、Tooltip 体系等 M1.7 批次 0 已做项不重做
+- 评审报告中"波形无拍标线（BPM grid）"等属 M2 对拍功能范畴，不入本 PATCH（记录到 y.problem 备忘，未来 [problems#N]）
+

@@ -7,27 +7,26 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath
 from PySide6.QtWidgets import QWidget
 
-from config.static.static_config import get_static_config
+from ui import palette
+from ui.palette import ThemeAware
+from ui.scale import s
 
-# 静态配置解包（小屏配色；accent 在 colors 子对象内，I2.1 修正层级）
-_SC = get_static_config()
-_UI = _SC.ui
-_UI_COLORS = _UI.get("colors", {})
-_SCREEN_BG = QColor(10, 12, 12)  # 屏底色（固定黑，不随主题）
-_GREEN = QColor(_UI_COLORS.get("accent", "#00ff41"))
+# 小屏配色（J2 起改 paint 时经 palette 现取 accent；屏底色固定黑不随主题）
+_SCREEN_BG = QColor(10, 12, 12)
 _RADIUS = 4
 
 
-class MiniDisplay(QWidget):
+class MiniDisplay(ThemeAware, QWidget):
     # 迷你屏幕：黑底 + 荧光绿等宽文字（双层绘制模拟辉光），只读
     def __init__(self, parent=None):
-        # 初始化：文字、等宽字体
+        # 初始化：文字、等宽字体；主题感知（J2）
         super().__init__(parent)
         self._text = ""
         font = QFont("Consolas")
         font.setBold(True)
         self.setFont(font)
-        self.setMinimumSize(48, 20)
+        self.setMinimumSize(s(48), s(20))  # J4：基准 × ui_scale
+        self.bind_theme()  # J2
 
     def set_text(self, text: str) -> None:
         # 设置显示文本（变化才重绘）
@@ -57,10 +56,11 @@ class MiniDisplay(QWidget):
             p.setFont(font_bold)
             elided = p.fontMetrics().elidedText(self._text, Qt.ElideRight, int(w - 8))
             # 辉光层：半透明粗描边
-            p.setPen(QColor(_GREEN.red(), _GREEN.green(), _GREEN.blue(), 90))
+            green = palette.color("accent", "#00ff41")
+            p.setPen(QColor(green.red(), green.green(), green.blue(), 90))
             p.drawText(rect.adjusted(1, 0, -1, 0), Qt.AlignCenter, elided)
             # 正文层：实色
-            p.setPen(_GREEN)
+            p.setPen(green)
             p.drawText(rect.adjusted(1, 0, -1, 0), Qt.AlignCenter, elided)
         p.end()
 

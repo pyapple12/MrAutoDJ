@@ -8,20 +8,19 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
 from config.static.static_config import get_static_config
+from ui import palette
+from ui.palette import ThemeAware
+from ui.scale import s
 from ui.widgets._skins import metal_gradient, metal_pen, top_highlight_pen
 
-# 静态配置解包（推子配色）
-_SC = get_static_config()
-_UI = _SC.ui
-_PANEL_INSET = QColor(_UI.get("panel_inset", "#101215"))
-_PANEL_EDGE = QColor(_UI.get("panel_edge", "#26292f"))
-_SILK = QColor(_UI.get("silk_text", "#8a9099"))
+# 静态配置解包（滚轮步进；配色改 paint 时经 palette 现取，J2 批次 2）
+_UI = get_static_config().ui
 WHEEL_STEP_DIVISIONS = int(
     _UI.get("wheel_step_divisions", 20)
 )  # 滚轮全程等分数（G1.3）
 
 
-class FaderSlider(QWidget):
+class FaderSlider(ThemeAware, QWidget):
     # 推子：值域 [min,max]，帽位置线性映射；垂直或水平
     valueChanged = Signal(float)
 
@@ -34,18 +33,20 @@ class FaderSlider(QWidget):
         length: int = 120,
         parent=None,
     ):
-        # 初始化：值域/方向/固定长度；垂直宽 24、水平高 24
+        # 初始化：值域/方向/固定长度；垂直宽 24、水平高 24；主题感知（J2）
         super().__init__(parent)
         self._min = min_value
         self._max = max_value
         self._default = default
         self._value = default
         self._orientation = orientation
+        # J4：宽/长基准 × ui_scale
         if orientation == Qt.Vertical:
-            self.setFixedSize(24, length)
+            self.setFixedSize(s(24), s(length))
         else:
-            self.setFixedSize(length, 24)
+            self.setFixedSize(s(length), s(24))
         self.setCursor(Qt.PointingHandCursor)
+        self.bind_theme()  # J2
 
     def value(self) -> float:
         # 当前值
@@ -103,9 +104,11 @@ class FaderSlider(QWidget):
     # --- 绘制 ---
 
     def paintEvent(self, event) -> None:
-        # 静态槽/刻度 + 动态金属帽（位置 = 值映射）
+        # 静态槽/刻度 + 动态金属帽（位置 = 值映射）；禁用态 35% 透明度（J0.4 灰显）
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        if not self.isEnabled():
+            p.setOpacity(0.35)
         vertical = self._orientation == Qt.Vertical
         w, h = self.width(), self.height()
         # 凹槽（内阴影感：inset 底 + 上下深线）
@@ -114,10 +117,10 @@ class FaderSlider(QWidget):
         else:
             groove = QRectF(4.0, h / 2.0 - 3.0, w - 8.0, 6.0)
         p.setPen(QPen(QColor(0, 0, 0, 120), 1))
-        p.setBrush(_PANEL_INSET)
+        p.setBrush(palette.color("panel_inset", "#101215"))
         p.drawRoundedRect(groove, 3, 3)
         # 中央线（刻度中点）
-        p.setPen(QPen(_SILK, 1))
+        p.setPen(QPen(palette.color("silk_text", "#8a9099"), 1))
         if vertical:
             p.drawLine(
                 int(w / 2.0),

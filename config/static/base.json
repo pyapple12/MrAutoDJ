@@ -1,6 +1,6 @@
 {
-  "version": "ver 0.25",
-  "window_width": 1280,
+  "version": "0.2.6",
+  "window_width": 1600,
   "window_height": 800,
   "sample_rate": 44100,
   "block_size": 2048,
@@ -8,6 +8,8 @@
   "analysis_sample_rate": 22050,
   "analysis_hop": 512,
   "key_shift_max": 12,
+  "tempo_ranges": [6, 10, 16, 100],
+  "keylock_debounce_ms": 300,
   "max_gain": 2.0,
   "vu_buffer": 32,
   "eq_freqs": [100, 1000, 10000],

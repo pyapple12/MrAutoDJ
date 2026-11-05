@@ -3,6 +3,12 @@
 > 目标：通读 12 个参考仓库，提炼本项目（Python 虚拟 DJ 台 → AI 自动 DJ → Claude 电台）可借鉴的
 > 代码结构、文件分类规范、代码规范、错误处理规范，逐步产出报告至 `w.study.md`。
 
+> **任务清单纪律**（2026-11-05 定案，对齐 CapsulePulse；细则见 AGENTS.md 同名节）：
+> - **既有 A/B/C/D/E/F/G/H/I/J 字母系列编号与格式原样保留、只增不删**——它们是已完成工作的勾选依据，不再按此方式新立任务
+> - **自此起新任务改用三线编号轨道**：`PL{NNN}` 功能里程碑 / `FIX{NNN}` 审计修复（与审计附录 `A{NNN}` 恒同号）/ `PATCH{NNN}` 小修小改；组格式 `### PL{NNN}: {标题} [来源引用]`（来源：[plan#附录] / [problems#N] / [audit#A{NNN}]），条目格式 `- [ ] PL{NNN}.{序号} {标题} —— {做法（文件/函数级）}；验证：{可执行可断言}`
+> - **勾选注记**：完成时改 `[x]` 并句尾追加 `（YYYY-MM-DD 已验证：{一句话结论}）`；结论如实，不达标不降级宣布
+> - 新组追加在区末尾（从上到下 = 从旧到新）；已完成组全量保留
+
 ## A. 前期准备
 
 - [x] A1 扫描仓库结构
@@ -301,3 +307,89 @@
 - [x] I4.2 GUI 实测（2026-11-05，AI 执行 + 用户授权）—— ① CLI 真机分析：`-m modules.analyzer --folder .temp/test_audio` 完整跑通 9/9（I0.1 修复在真实 CLI 路径生效），broken.wav 可读报错降级不中断；② 真实引擎静音端到端（probe_i4_gui，主音量 0）：解码 (N,2)/播放推进/Censor 曲头保持反向/start_mix→MIXING→PLAYING/FX 深度扫动复用实例不崩/VU 采集；③ 加载态截图读图核对（见 I4.1）。注：FX 咔嗒消除的主观听感建议日常使用中复核
 - [x] I4.3 文档同步（2026-11-05）—— z.plan A003 标注已修 + 补录项说明、x.progress I 系列勾选、README 修正（I3.4 同步）、版本号 ver 0.25（base.json + README 徽章）
 - [x] I4.4 提交 V0.25（2026-11-05，用户授权 AI 执行；w.study.md 预存改动未纳入，另行处理）
+
+## J. M1.7 虚拟控制台完善与外观层任务清单（依据 z.plan.md 附录：M1.7 工作计划 V2）
+
+> 规划：2026-11-05 落盘（方案 2026-08-13 定稿）。批次 0→1→2→3→4 顺序执行；批次 0 尺寸只定基准（缩放因子留批次 4）；每步无头截图 + AI 读图核对（本会话模型已具备视觉能力）+ 用户确认最终视觉。
+> 做法说明：—— 做法 为执行要点，先自查代码上下文再动手。
+
+### J0. 批次 0：UI 优化（前置，不动功能与引擎）
+
+- [x] J0.1 布局进配置（2026-11-05）—— `splitter_library_pct`/`splitter_main_pcts` + `spacing_sm/md/lg` 进 ui.json；main_window 网格常量替换散落 6/8/10/12；body/main 加 stretch 因子（双 Deck 拉伸、其余定比）；验证：probe_j0 源码断言无硬编码比例
+- [x] J0.2 Browse 顶栏分组（2026-11-05）—— LOAD 组/搜索组/状态组按网格间距分组；LOAD/搜索/打开/目标盘/SHIFT 五控件 Tooltip
+- [x] J0.3 部件大小分级进配置（2026-11-05）—— `button_min_width/height` 32×32（GlowButton）、`knob_size_mixer` 32 / `knob_size_fx` 28、`jog_size` 140（钳制 120-180）、`pad_btn_size` 42 全部进 ui.json；验证：probe_j0 断言各控件实际尺寸
+- [x] J0.4 原语控件禁用态视觉（2026-11-05）—— GlowButton/RotaryKnob/FaderSlider paintEvent 检查 `isEnabled()` → `setOpacity(0.35)`（灰显统一视觉语言）
+- [x] J0.5 部件位置按 FLX4 语义（2026-11-05）—— Deck 区右侧 TEMPO 竖置位（`_tempo_a/b` 禁用推子占位 + 标签，Pitch 滑块保留作量程指示 + Tooltip）；Mixer 底部 PHONES 行（CUE A/B + 平衡/音量占位禁用）；deck_widget Keylock 灰显 + Tooltip"批次 1 接入"
+- [x] J0.6 死控件灰显标注（2026-11-05）—— Beat FX AUTO/TAP/CH1/CH2/1+2 五控件禁用 + Tooltip"预留（批次 1 接线）"；拍数 ± 保留（有本地可见反馈，对齐方案 0d 清单；probe_p6 兼容）
+- [x] J0.7 操作反馈与状态显性化（2026-11-05）—— `_bind_value_tip` 数值 Tooltip（TRIM/MASTER ×倍率、EQ dB 换算、横推左右占比、DEPTH %）；EFFECTS 区 FX 状态 MiniDisplay（`_update_fx_status`，经 `_apply_beat_fx`/`_toggle_target` 联动，效果名大写对齐硬件小屏观感）
+- [x] J0.8 可用性（2026-11-05）—— 空格 = 播放/暂停目标盘（keyPressEvent 实现，子控件持有焦点时不干扰搜索输入）；Ctrl+F 聚焦搜索（QShortcut）；Browse 行 Tab 顺序；窗口标题带版本号
+- [x] J0.9 检验（2026-11-05）—— probe_j0 全 PASS + **全量回归 17/17 PASS** + 冒烟 OK + layout_j.png 空载/加载态截图 AI 读图核对（批次 0 改动全部呈现：分组/增大/灰显/TEMPO 位/耳机位/状态小屏，零布局破坏；e2e 静音端到端重跑 PASS——一次 VU=0 为设备瞬时争用非回归）
+
+### J1. 批次 1：功能补齐（2026-11-05 完成；目测项按用户授权闭环）
+
+- [x] J1.1 引擎实时变速与重渲染（P4 闭环）—— `Deck.set_tempo_rate` 乐速倍率（TEMPO 实时变速，插值填充音高随速变化）；Keylock/Key Shift 经 `stretcher.make_tempo_buffer`（恒速 timemap + 可选 --pitch）后台重渲染烘焙（`_apply_rebias`：去抖 300ms + epoch 防陈旧 + MIXING 让路 + `_swap_buffer` 位置域重映射 cue/hot cue/loop/slip/搓碟；keylock 关卸载烘焙回原速域）；`_beat_len` 乘烘焙比保乐理拍长
+- [x] J1.2 TEMPO 推子与量程 —— 竖置推子启用 + 量程循环按钮（±6/±10/±16/WIDE，`tempo_ranges` 进 base.json），量程切换保持乐速（滑块重映射）；原 Pitch 滑块转只读反显；手动动推子解除该盘 Beat Sync
+- [x] J1.3 Beat Sync —— SYNC 键（deck_widget）：对齐另一盘 `effective_bpm`（乐速倍率钳当前量程内），LED 蓝色；无 BPM 防御提示
+- [x] J1.4 循环键行 —— IN/OUT（入点标记→出点闭合激活）/4BEAT/◀减半/▶加倍（`loop_in/loop_out/loop_halve/loop_double` + `loop_active` 公开属性）
+- [x] J1.5 Key Shift 真实变调 —— Pad Key Shift 经同一重渲染管线烘焙 --pitch（时长不变位置无损），归零还原
+- [x] J1.6 Beat FX 拍数接线 —— `set_fx_beats`：Echo/Delay 延迟 = beats/4 拍（BPM 驱动、钳 1.9s）、Trans 门控周期随拍数；set_tempo/tap 联动重配
+- [x] J1.7 Beat FX AUTO/TAP/CH 启用 —— AUTO（曲目 BPM 时基校验）/TAP（点按测速）/CH1/CH2/1+2（FX 作用通道选择，`_apply_beat_fx` 通道化 + 切通道清残留）
+- [x] J1.8 耳机监听启用 —— `AudioEngine.ensure_cue_player` 惰性创建（失败降级提示）；CUE A/B 独占预听（`Deck.cue_buffer` 当前位切片）+ 监听音量；平衡旋钮预留（需双源混音 v2）
+- [x] J1.9 检验 —— probe_j1 全 PASS（含真实 rubberband Keylock 渲染闭环 + 域重映射断言）+ 全量回归（probe_j0 同步批次 1 后预期）
+
+### J2. 批次 2：Theme 化（2026-11-05 完成）
+
+- [x] J2.1 token 动态化 —— 新建 `ui/palette.py`（token()/color() 运行期现取 + ThemeBus 广播 + ThemeAware 混入统一清缓存刷新）；8 个自绘控件模块级 QColor 常量全部改 paint 时现取
+- [x] J2.2 主题注册表 —— dark = ui.json 原生 / light = ui.json + `theme_light` 覆盖表（ui.json 新增浅色 token 集）；themes.py 改 palette 驱动（apply_theme/switch_theme）
+- [x] J2.3 切换入口 —— Ctrl+T 运行期循环切换（token 表 + QSS 重建 + 静态 LED 重涂 `_apply_static_leds` + FX 效果键 `reapply_leds`），全控件刷新无重启
+- [x] J2.4 检验 —— probe_j2 全 PASS（token 切换/未知主题拒绝/缓存失效/双主题渲染/截图）+ layout_j2_light.png 读图核对（浅色协调、Jog 金属与中心屏本色保留）
+
+### J3. 批次 3：贴图拟物化（A 路线，2026-11-05 完成）
+
+- [x] J3.1 程序化贴图缓存 —— 新建 `ui/widgets/_textures.py`：拉丝金属纹理离线渲染 → PNG 磁盘缓存（cache/ui_textures/，gitignore 可重建），三级查找 内存→磁盘→现渲染；键 = 名称_主题_尺寸（主题/分辨率天然隔离）
+- [x] J3.2 PanelFrame 贴图底 —— 渐变+拉丝线程序化绘制替换为贴图 drawPixmap（裁剪圆角），高光带/描边保留；主题切换随缓存失效自动换贴图
+- [x] J3.3 检验 —— probe_j34 J3 段全 PASS（写盘/回读/主题键控/渲染）+ 贴图文件落盘确认
+
+### J4. 批次 4：大小缩放（2026-11-05 完成）
+
+- [x] J4.1 全局缩放 —— 新建 `ui/scale.py`（`s()` 统一换算，ui.json `ui_scale` 启动读取）；应用到 GlowButton 最小尺寸/RotaryKnob/FaderSlider/LedStrip/MiniDisplay/Jog/Pad/间距网格/TEMPO 与横推长度/FX 小屏
+- [x] J4.2 检验 —— probe_j34 J4 段全 PASS（monkeypatch SCALE=1.5 全控件尺寸 ×1.5 + 缩放态渲染）；默认 1.0 行为不变
+
+---
+
+# PL/FIX/PATCH 任务轨道（2026-11-05 起：三线编号，规则见 AGENTS.md 任务清单纪律；以上字母系列封存仅作历史勾选依据）
+
+## 未完成
+
+### PL001: UI 评审修复（截断与列宽 / 面板补丁 / 激活态层级） [评审 2026-11-05 → z.plan.md 附录 PL001]
+
+> 来源：taste-skill（app-screens 模式）UI 评审，overall 6.0，Top3 = 截断与列宽 / 面板补丁与状态诚实 / 激活态层级。方案（四组措施 + 验证方案）见 z.plan.md 附录 PL001，做法均已到文件/函数级。
+> 执行约定：走 progress-task 流程——每条先写探针断言（先 FAIL 后 PASS）再实现；before 截图已存 `.temp/ui_preview/review/`，收尾出 after 对比；不动引擎层与配色 token 值。
+
+#### 组 A：截断与列宽
+
+- [x] PL001.1 splitter 列宽下限与比例重申 —— `ui/main_window.py _build_ui()`：曲库/deck/mixer/effects 四面板 `setMinimumWidth(260/420/230/250)`；新增 `_apply_splitter_sizes()` 集中 body/main 两级 `setSizes`，构造调用一次 + `QTimer.singleShot(0, ...)` show 后重申（曲库塌缩根因 = show 后 sizeHint 重算覆盖初始比例）；验证：probe_pl001 断言 1650×800 show 后 `library_panel.width() >= 260`（先 FAIL 后 PASS）（2026-11-05 已验证：show 后曲库 320/deck 422/effects 290（probe 断言过））
+- [x] PL001.2 GlowButton 文本自适应缩字 —— `ui/widgets/glow_button.py paintEvent()`：elide 前按 `QFontMetrics.horizontalAdvance(text)` 与可用宽比较，超宽字号降一档（pointSize-1，最低 8）再 elide；验证：probe_pl001 对 LOAD A/B、FX 5 键、CH 3 键、模式 5 键、FaderStart/Tap、PHONES 2 键断言 `horizontalAdvance(text) <= width()-6`（先 FAIL——当前 Tr…/Ec…/Beat L… 截断复现——后 PASS）（2026-11-05 已验证：22 键 text_fits 全过；根因 = 无 sizeHint 覆写（补文本驱动 hint））
+- [x] PL001.3 BeatFxWidget 效果/通道两行布局 —— `ui/beat_fx_widget.py __init__()`：row1 拆 `fx_row`（FX+效果 5 键）与 `ch_row`（CH1/CH2/1+2）两行；AUTO/TAP 保持 row2 右置；验证：probe_pl001 断言 FX 键文本完整 + 截图目检两行不溢出（2026-11-05 已验证：FX/CH 两行 + 8pt + 去 FX 标签 + 边距归零，5 键全完整）
+- [x] PL001.4 Pad 模式键硬件短名 —— `ui/pad_widget.py`：新增 `PAD_MODE_LABELS = {"Beat Loop": "LOOP", "Beat Jump": "JUMP", "Sampler": "SMP", "Key Shift": "KEY", "Hot Cue": "CUE"}`（信号值 PAD_MODES 不变），模式键构造文本用 LABELS，`_select_mode`/`_apply_mode_color`/main_window `_on_pad` 逻辑零改动；验证：probe_pl001 断言模式键文本完整 + 点击发原模式值（行为等价）（2026-11-05 已验证：短名 CUE/LOOP/JUMP/SMP/KEY，业务值不变（行为等价断言过））
+- [x] PL001.5 Mixer/PHONES 按钮短名 —— `ui/main_window.py _build_mixer_panel()`：FaderStart 文本 `{label} FS`、Tap 文本 `TAP`；PHONES 键 `CUE A/B`→`CA`/`CB`（tooltip 全名保留）；验证：probe_pl001 文本完整断言 + tooltip 非空断言（2026-11-05 已验证：A FS/B FS/TAP/CA/CB 全完整，tooltip 全名保留）
+
+#### 组 B：面板补丁与状态诚实
+
+- [x] PL001.6 QSS 背景作用域改造 —— `ui/themes.py _build_qss()`：删 `QMainWindow, QWidget { background: {bg} }` 全局实底，改全局 `QWidget { background: transparent; color: {fg}; }` + 定点实底（QTableWidget/QLineEdit/QStatusBar/QMainWindow 保留 bg）；验证：probe_pl001 源码断言无全局 QWidget 实底规则 + dark/light 双主题 grab 不崩 + QTableWidget/QLineEdit 仍有实底（浅色可读）——**B1 后重截 zoom_mixer 定位 EQ/横推残留色块（B2 前置）**（2026-11-05 已验证：全局透明 + 定点实底，双主题应用过，表/输入框实底在）
+- [x] PL001.7 Mixer 残留色块清除 —— B1 后若 EQ 标签下 90×70 / 横推旁 120×200 色块仍残留：`.temp/probe_block.py` objectName 临时描边逐容器排除（候选：row2 拉伸 QLabel、xf_col 横推标签被 stretch 拉高）；修复（横推标签 `xf_col.addWidget(QLabel, 0, Qt.AlignHCenter)` + 行高固定等）；验证：after 截图 zoom_mixer 无色块（目检）（2026-11-05 已验证：B1 后色块自愈消失（zoom_mixer 目检），无遗留）
+- [x] PL001.8 LedStrip 未亮段可见框架 —— `ui/widgets/led_strip.py _segment_color()` 未亮分支 `panel_inset`→`panel_edge` + `paintEvent()` 段顶 1px 6% 白描边；验证：probe_pl001 断言未亮段色 == panel_edge + zoom_mixer 截图 VU 框架目检可见（2026-11-05 已验证：未亮段=panel_edge+描边，VU 框架暗面板可见（截图目检））
+- [x] PL001.9 Jog 中心屏重叠修复 —— `ui/jog_wheel.py`：Vinyl checkbox 改独立行（圆盘 paintEvent 圆心 y 下移 checkbox 高/2 + 半径同步收缩，或 checkbox 移底部 18px 头部行，实现取简）；验证：probe_pl001 断言 checkbox geometry 与中心屏文本区不相交 + zoom_deck_a 截图 "---- BPM" 无叠字（先 FAIL——当前重叠复现——后 PASS）（2026-11-05 已验证：checkbox 钉顶部（AlignTop），中心屏 20.0 BPM 无叠字（相交断言过））
+
+#### 组 C：激活态层级
+
+- [x] PL001.10 效果键初始橙光 —— `ui/beat_fx_widget.py __init__()` 末尾补调 `self._select_fx("HPF")`；验证：probe_pl001 断言构造后 HPF 键 `_led_color == QColor(ui.json glow_orange)`（先 FAIL——当前白光——后 PASS）（2026-11-05 已验证：构造即 _select_fx(HPF)，初始橙光（断言过））
+- [x] PL001.11 激活辉光分档 + FX ON 描边激活 —— `ui/widgets/glow_button.py paintEvent()`：`isChecked()`（非按压）态辉光半径 ×0.85、外圈 alpha 220→150（按压/LED 常亮不变）；FX ON 描边激活：`ui/beat_fx_widget.py` 构造 FX ON 时启用新描边模式（checked 画 1.5px led 色圆角描边 + 文字亮色，不整面辉光），主操作唯一性还给 Mix Now；验证：probe_pl001 断言 checked 态绘制参数分档生效 + zoom_effects 截图目检（2026-11-05 已验证：_glow_params 三档 + FX ON 描边激活（断言+目检））
+- [x] PL001.12 Pitch 滑块拟物化 —— `ui/deck_widget.py`：QSlider → `FaderSlider(-8, 8, 0, Qt.Horizontal, length=200)`；`set_pitch_display()` 改 `set_value` + blockSignals 防回环；`ui/themes.py` 清 QSlider QSS 规则；验证：probe_pl001 断言 pitch 控件 isinstance FaderSlider + set_pitch_display 后 slider 值正确且不 emit pitch_changed + zoom_deck_a 截图目检（2026-11-05 已验证：Pitch=FaderSlider，反显 3.5 不回环（断言过））
+- [x] PL001.13 曲库空态引导 —— `ui/main_window.py _build_ui()`：曲库表格上叠居中 QLabel（silk 12px）"打开文件夹加载曲库 · 双击曲目加载到目标盘"，`load_library()` 追加行后 `setVisible(False)`；验证：probe_pl001 断言空库时引导可见、加载后隐藏（2026-11-05 已验证：空库引导句可见、加载后隐藏（断言过））
+- [x] PL001.14 light 主题辉光降档 —— `ui/widgets/glow_button.py paintEvent()`：辉光 alpha 按 `palette.current()` 分档（dark 220 / light 150，中心 110/70）；验证：probe_pl001 断言 light 下 alpha 参数 + light_loaded 截图目检光晕不发脏（2026-11-05 已验证：light 辉光 150/70 < dark 220/110（断言过））
+
+#### 组 E：检验与收尾
+
+- [x] PL001.15 探针与全量回归 —— 新建 `.temp/probe_pl001.py`（组 A-D 全部断言，TDD 先 FAIL 后 PASS）；全量 21 既有探针重跑 PASS（p5/p6/j0 的文本/布局断言随 A2-A5 同步更新）；冒烟 import；验证：RESULT 全 PASS（2026-11-05 已验证：probe_pl001 全 PASS + 22/22 探针回归 + 冒烟 OK）
+- [x] PL001.16 after 截图对比与文档 —— 重跑 `.temp/review_shots.py` 出 after 组（dark 空载/加载、light 加载、三特写）与 before 逐项目检（截断清零/无色块/VU 框架/Jog 无叠字/FX ON 描边/空态引导）；多模态读图核对；文档同步（本组勾选 + z.plan 附录 PL001 状态回写 + README 徽章随版本）；提交（四段式 V0.2.6.1，用户执行）（2026-11-05 已验证：after 截图 dark/light×3 特写目检全过；说明区 8 文件同步；y.problem 补 P5）

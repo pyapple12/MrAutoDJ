@@ -17,15 +17,13 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget
 
 from config.static.static_config import get_static_config
+from ui import palette
+from ui.palette import ThemeAware
+from ui.scale import s
 from ui.widgets._skins import metal_gradient, top_highlight_pen
 
-# 静态配置解包（旋钮配色）
-_SC = get_static_config()
-_UI = _SC.ui
-_PANEL_EDGE = QColor(_UI.get("panel_edge", "#26292f"))
-_PANEL_INSET = QColor(_UI.get("panel_inset", "#101215"))
-_SILK = QColor(_UI.get("silk_text", "#8a9099"))
-_GLOW_WHITE = QColor(_UI.get("glow_white", "#e8ecf0"))
+# 静态配置解包（滚轮步进；配色改 paint 时经 palette 现取，J2 批次 2）
+_UI = get_static_config().ui
 _ANGLE_RANGE = 270.0  # 行程 270°（DJ 旋钮惯例）
 _DRAG_SENS = 80.0  # 拖拽像素 → 全程（值域全程对应 80px）
 WHEEL_STEP_DIVISIONS = int(
@@ -33,7 +31,7 @@ WHEEL_STEP_DIVISIONS = int(
 )  # 滚轮全程等分数（G1.3）
 
 
-class RotaryKnob(QWidget):
+class RotaryKnob(ThemeAware, QWidget):
     # 旋钮：值域 [min,max]，指针角度线性映射；静态层缓存，动态层只画指针
     valueChanged = Signal(float)
 
@@ -45,7 +43,7 @@ class RotaryKnob(QWidget):
         size: int = 28,
         parent=None,
     ):
-        # 初始化：值域/默认值/固定尺寸；拖拽锚点
+        # 初始化：值域/默认值/固定尺寸；拖拽锚点；主题感知（J2 切换清缓存重绘）
         super().__init__(parent)
         self._min = min_value
         self._max = max_value
@@ -55,8 +53,9 @@ class RotaryKnob(QWidget):
         self._drag_v0 = self._value
         self._pixmap: QPixmap | None = None
         self._cached_size = None
-        self.setFixedSize(size, size)
+        self.setFixedSize(s(size), s(size))  # J4：基准尺寸 × ui_scale
         self.setCursor(Qt.PointingHandCursor)
+        self.bind_theme()  # J2
 
     def value(self) -> float:
         # 当前值
@@ -106,10 +105,12 @@ class RotaryKnob(QWidget):
     # --- 绘制 ---
 
     def paintEvent(self, event) -> None:
-        # 静态层 blit + 动态指针线（按当前角度）
+        # 静态层 blit + 动态指针线（按当前角度）；禁用态 35% 透明度（J0.4 灰显）
         if self._pixmap is None or self._cached_size != self.size():
             self._render_cache()
         painter = QPainter(self)
+        if not self.isEnabled():
+            painter.setOpacity(0.35)
         painter.drawPixmap(0, 0, self._pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
         s = self.width()
@@ -117,7 +118,7 @@ class RotaryKnob(QWidget):
         ang = math.radians(self._angle())
         r = s * 0.32
         # G0.4：指针直接画"圆心→端点"（原实现用 QRectF 当点取 center 致线段错位）
-        painter.setPen(QPen(_GLOW_WHITE, 2, Qt.SolidLine, Qt.RoundCap))
+        painter.setPen(QPen(palette.color("glow_white", "#e8ecf0"), 2, Qt.SolidLine, Qt.RoundCap))
         painter.drawLine(
             QPointF(cx, cy),
             QPointF(cx + r * math.cos(ang), cy + r * math.sin(ang)),

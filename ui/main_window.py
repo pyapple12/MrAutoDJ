@@ -8,7 +8,9 @@ import time as _time
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -24,7 +26,7 @@ from PySide6.QtWidgets import (
 
 from config.static.static_config import get_static_config
 from modules import analyzer as analyzer_mod
-from modules.engine import AudioEngine, SLOT_COUNT, State
+from modules.engine import AudioEngine, EQ_GAIN_DB, SLOT_COUNT, State
 from modules.stretcher import rubberband_available
 from modules.transition import tempo_compatible
 from modules.transition_manager import DEFAULT_FADE_SECONDS, TransitionManager
@@ -32,10 +34,13 @@ from ui.beat_fx_widget import BEAT_LADDER, BeatFxWidget
 from ui.deck_widget import DeckWidget
 from ui.jog_wheel import JogWheel
 from ui.pad_widget import PadWidget
+from ui import palette
+from ui.scale import s
 from ui.shift_state import ShiftState
 from ui.widgets.fader_slider import FaderSlider
 from ui.widgets.glow_button import GlowButton
 from ui.widgets.led_strip import LedStrip
+from ui.widgets.mini_display import MiniDisplay
 from ui.widgets.panel_frame import PanelFrame
 from ui.widgets.rotary_knob import RotaryKnob
 from utils.logger import get_logger
@@ -43,8 +48,17 @@ from utils.logger import get_logger
 # 静态配置解包（窗口尺寸，AGENTS.md 参数约定）
 _SC = get_static_config()
 _UI = _SC.ui  # 静态配置解包（窗口尺寸/配色 token）
-
 _logger = get_logger(__name__)
+
+# 间距网格与部件尺寸（J0.1/J0.3：4/8/12 三级网格 + 大小分级，ui.json 驱动；
+# J4：全部经 ui.scale 乘全局缩放因子；PL001.1 起 main 列宽 = mins+shares 机制，
+# _MAIN_PCTS 百分比键退役，改 splitter_main_mins/splitter_main_shares）
+_SP_SM = s(int(_UI.get("spacing_sm", 4)))
+_SP_MD = s(int(_UI.get("spacing_md", 8)))
+_SP_LG = s(int(_UI.get("spacing_lg", 12)))
+_KNOB_MIXER = s(int(_UI.get("knob_size_mixer", 32)))
+_KNOB_FX = s(int(_UI.get("knob_size_fx", 28)))
+_LIB_PCT = int(_UI.get("splitter_library_pct", 18))
 
 
 def _on_analysis_result(window, path: str, record, error, epoch: int = -1) -> None:
@@ -94,6 +108,15 @@ class MainWindow(QMainWindow):
         # Beat FX 目标盘配置（E2.4 面板 → 引擎）
         self._beat_fx_effect: str = ""
         self._beat_fx_depth: float = 0.0
+        # --- J1.0/J1.1 TEMPO/Sync/FX 通道/监听状态 ---
+        self._tempo_ranges = [
+            int(x) for x in (_SC.base.get("tempo_ranges") or [6, 10, 16, 100])
+        ]
+        self._tempo_range = {"a": self._tempo_ranges[0], "b": self._tempo_ranges[0]}
+        self._sync_on = {"a": False, "b": False}
+        self._fx_channel = "1"  # CH1/CH2/both
+        self._fx_beats = 4
+        self._cue_active: str | None = None  # 当前监听盘
         # 弯音脉冲归零（P2 修复）：每盘 pending 值 + 单发定时器（超时调 jog_bend(0)）
         self._bend_pending: dict = {"a": 0.0, "b": 0.0}
         self._bend_timers: dict = {}
@@ -104,7 +127,7 @@ class MainWindow(QMainWindow):
             _t.timeout.connect(lambda l=_letter: self._on_bend_timeout(l))
             self._bend_timers[_letter] = _t
 
-        self.setWindowTitle("MrAutoDJ")
+        self.setWindowTitle(f"MrAutoDJ {_SC.base.get('version', '')}")  # J0.8：标题带版本
         w = int(_SC.base.get("window_width", 1280))
         h = int(_SC.base.get("window_height", 800))
         self._win_w = w
@@ -125,27 +148,36 @@ class MainWindow(QMainWindow):
         # 每区 PanelFrame 深色面板包裹（对齐参考图）
         central = QWidget()
         root = QVBoxLayout(central)
-        root.setContentsMargins(6, 6, 6, 6)
-        root.setSpacing(6)
+        root.setContentsMargins(_SP_MD, _SP_MD, _SP_MD, _SP_MD)
+        root.setSpacing(_SP_MD)
 
-        # --- Browse 区（顶部面板） ---
+        # --- Browse 区（顶部面板，J0.2：LOAD 组 / 搜索组 / 状态组 + Tooltip） ---
         browse_panel = PanelFrame("BROWSE")
         browse = QHBoxLayout(browse_panel)
-        browse.setContentsMargins(10, 8, 10, 8)
+        browse.setContentsMargins(_SP_LG, _SP_MD, _SP_LG, _SP_MD)
+        browse.setSpacing(_SP_SM)
         self._load_a_btn = GlowButton("LOAD A")
         self._load_a_btn.set_led(True, _UI.get("glow_orange", "#ff7a2f"))
         self._load_b_btn = GlowButton("LOAD B")
         self._load_b_btn.set_led(True, _UI.get("glow_orange", "#ff7a2f"))
+        self._load_a_btn.setToolTip("加载选中曲目到 DECK A")
+        self._load_b_btn.setToolTip("加载选中曲目到 DECK B")
         self._search = QLineEdit()
         self._search.setPlaceholderText("搜索曲库...")
+        self._search.setToolTip("输入关键字过滤曲库（Ctrl+F 聚焦）")
         self._open_btn = GlowButton("打开文件夹")
+        self._open_btn.setToolTip("选择音乐文件夹并加载曲库（后台分析，失败曲目降级）")
         self._target_btn = GlowButton("目标盘: A")
+        self._target_btn.setToolTip("双击曲库与 Beat FX 的作用盘；空格 = 播放/暂停目标盘")
         # E2.1 全局 SHIFT 按钮（也可用键盘 SHIFT）
         self._shift_btn = GlowButton("SHIFT")
         self._shift_btn.setCheckable(True)
+        self._shift_btn.setToolTip("全局 SHIFT：按住（键盘或点按）解锁控件第二功能")
         browse.addWidget(self._load_a_btn)
         browse.addWidget(self._load_b_btn)
+        browse.addSpacing(_SP_MD)
         browse.addWidget(self._search, 1)
+        browse.addSpacing(_SP_MD)
         browse.addWidget(self._open_btn)
         browse.addWidget(self._target_btn)
         browse.addWidget(self._shift_btn)
@@ -166,6 +198,14 @@ class MainWindow(QMainWindow):
         self._table.setSelectionBehavior(QTableWidget.SelectRows)
         self._table.horizontalHeader().setStretchLastSection(True)
         lib_box.addWidget(self._table)
+        # PL001.13：空库引导句（empty keeps frame + 一句话；有行即隐藏）
+        self._lib_hint = QLabel("打开文件夹加载曲库 · 双击曲目加载到目标盘")
+        self._lib_hint.setAlignment(Qt.AlignCenter)
+        self._lib_hint.setStyleSheet(
+            f"color: {palette.color('silk_text', '#8a9099').name()}; "
+            "font-size: 12px; background: transparent;"
+        )
+        lib_box.addWidget(self._lib_hint)
         body.addWidget(lib_panel)
 
         # 双打碟机（含 E2 组件：Jog / Pad / 表演键；G3.5 导入上移顶层）
@@ -215,122 +255,266 @@ class MainWindow(QMainWindow):
         )
         main.addWidget(self._build_effects_panel())
         body.addWidget(main)
-        w = self._win_w
-        body.setSizes([int(w * 0.24), int(w * 0.76)])
-        main.setSizes([int(w * 0.24), int(w * 0.22), int(w * 0.24), int(w * 0.19)])
+        # J0.1：比例进 ui.json + stretch 因子（曲库/Mixer/FX 定比、双 Deck 均分拉伸）
+        body.setChildrenCollapsible(False)
+        main.setChildrenCollapsible(False)
+        # PL001.1：列宽下限（五列最小宽总和 1270 ≤ 主区可用 1276@1600 窗——
+        # Pad 全宽化后 deck 395 / mixer 200 / effects 280）
+        lib_panel.setMinimumWidth(280)
+        self._main_mins = [int(v) for v in _UI.get("splitter_main_mins", [395, 200, 395, 280])]
+        self._main_shares = [float(v) for v in _UI.get("splitter_main_shares", [0.375, 0.10, 0.375, 0.15])]
+        main.widget(0).setMinimumWidth(self._main_mins[0])
+        main.widget(1).setMinimumWidth(self._main_mins[1])
+        main.widget(2).setMinimumWidth(self._main_mins[2])
+        main.widget(3).setMinimumWidth(self._main_mins[3])
+        self._splitter_body = body
+        self._splitter_main = main
+        self._apply_splitter_sizes()
+        QTimer.singleShot(0, self._apply_splitter_sizes)  # show 后重申比例
+        body.setStretchFactor(0, 0)
+        body.setStretchFactor(1, 1)
+        main.setStretchFactor(0, 1)
+        main.setStretchFactor(1, 0)
+        main.setStretchFactor(2, 1)
+        main.setStretchFactor(3, 0)
         root.addWidget(body, 3)
+
+        # J0.8：Browse 行 Tab 顺序
+        for a, b in (
+            (self._load_a_btn, self._load_b_btn),
+            (self._load_b_btn, self._search),
+            (self._search, self._open_btn),
+            (self._open_btn, self._target_btn),
+            (self._target_btn, self._shift_btn),
+        ):
+            QWidget.setTabOrder(a, b)
 
         self.setCentralWidget(central)
         self.setStatusBar(QStatusBar())
+        self._update_lib_hint()
         self._status("就绪")
+
+    def _apply_splitter_sizes(self) -> None:
+        # PL001.1：确定性两级 splitter 尺寸（构造时与 show 后各执行一次）。
+        # body = 库列窗宽百分比；main = **各列最小宽 + 富余按份额分配**
+        # （原按窗宽百分比的 setSizes 总和 > 主区宽，被 QSplitter 等比压缩 +
+        # 最小宽钳制，列宽失真且不可预测；mins+shares 任何窗宽下全列 ≥ min）
+        w = max(self.width(), 1)
+        self._splitter_body.setSizes(
+            [int(w * _LIB_PCT / 100), int(w * (100 - _LIB_PCT) / 100)]
+        )
+        mw = max(self._splitter_main.width(), 1)
+        extra = max(0, mw - sum(self._main_mins))
+        self._splitter_main.setSizes(
+            [m + int(extra * sh) for m, sh in zip(self._main_mins, self._main_shares)]
+        )
+
+    def _update_lib_hint(self) -> None:
+        # PL001.13：空库显示引导句，有行即隐藏
+        self._lib_hint.setVisible(self._table.rowCount() == 0)
 
     def _build_deck_panel(
         self, letter: str, name: str, wdg, jog, pad, slip, censor, stut
     ) -> QWidget:
-        # 构建单盘面板：DeckWidget（信息/波形/控制/Pitch）+ Jog + Pad + 表演键
+        # 构建单盘面板：DeckWidget（信息/波形/控制/Pitch）+ Jog/TEMPO 行 +
+        # 全宽 Pad 行（含模式键）+ 表演键行
+        # （PL001.1 改版：8×42 Pad 网格须 ~380px 行宽，与 Jog 同行在五列布局的
+        # Deck 列宽（≥400）下结构性放不下——Pad 移至 Jog 行下方全宽，FLX4 同为
+        # Pad 区独立于转盘区的行分布）
         panel = PanelFrame(name)
         box = QVBoxLayout(panel)
-        box.setContentsMargins(8, 8, 8, 8)
+        box.setContentsMargins(_SP_MD, _SP_MD, _SP_MD, _SP_MD)
+        box.setSpacing(_SP_SM)
         box.addWidget(wdg, 1)
-        perf = QHBoxLayout()
-        perf.addWidget(jog)
-        pad_col = QVBoxLayout()
-        pad_col.addWidget(pad)
+        # 上排：Jog + TEMPO 竖置位（实时变速 + 量程循环；Pitch 滑块只读反显）
+        top = QHBoxLayout()
+        top.setSpacing(_SP_MD)
+        top.addWidget(jog)
+        top.addStretch(1)
+        tempo_col = QVBoxLayout()
+        tempo_col.setSpacing(_SP_SM)
+        tempo_col.addWidget(QLabel("TEMPO"), 0, Qt.AlignHCenter)
+        tempo = FaderSlider(-1.0, 1.0, 0.0, Qt.Vertical, length=s(120))
+        tempo.setToolTip("TEMPO 实时变速（Keylock 开时经重渲染保持音高）")
+        setattr(self, f"_tempo_{letter}", tempo)
+        range_btn = GlowButton(f"±{self._tempo_range[letter]}%")
+        range_btn.setToolTip("切换 TEMPO 量程（±6/±10/±16/WIDE）")
+        setattr(self, f"_tempo_range_btn_{letter}", range_btn)
+        tempo_col.addWidget(tempo, 0, Qt.AlignHCenter)
+        tempo_col.addWidget(range_btn, 0, Qt.AlignHCenter)
+        top.addLayout(tempo_col)
+        box.addLayout(top)
+        # 全宽 Pad 行（含模式键）与表演键行
+        box.addWidget(pad)
         krow = QHBoxLayout()
+        krow.setSpacing(_SP_SM)
         for k in (slip, censor, stut):
             krow.addWidget(k)
-        pad_col.addLayout(krow)
-        perf.addLayout(pad_col)
-        box.addLayout(perf)
+        box.addLayout(krow)
+        tempo.valueChanged.connect(lambda v, l=letter: self._on_tempo(l, v))
+        range_btn.clicked.connect(lambda l=letter: self._cycle_tempo_range(l))
+        self._bind_value_tip(tempo, lambda v, l=letter: self._tempo_tip(l, v))
         return panel
 
     def _build_mixer_panel(self) -> QWidget:
         # 构建 Mixer 面板：TRIM/EQ 旋钮 + VU/推子/FaderStart/Tap + 横推 + 主音量
+        # + 耳机监听区预留（J0.5）
         panel = PanelFrame("MIXER")
         box = QVBoxLayout(panel)
-        box.setContentsMargins(8, 8, 8, 8)
-        # 行1：TRIM A/B
+        box.setContentsMargins(_SP_MD, _SP_MD, _SP_MD, _SP_MD)
+        box.setSpacing(_SP_MD)
+        # 行1：TRIM A/B（J0.3：Mixer 旋钮 32 分级；J0.7：数值 Tooltip）
         row1 = QHBoxLayout()
+        row1.setSpacing(_SP_SM)
         row1.addWidget(QLabel("A TRIM"))
-        self._trim_a = RotaryKnob(0.0, 2.0, default=1.0)
+        self._trim_a = RotaryKnob(0.0, 2.0, default=1.0, size=_KNOB_MIXER)
         row1.addWidget(self._trim_a)
-        row1.addSpacing(12)
+        row1.addSpacing(_SP_LG)
         row1.addWidget(QLabel("B TRIM"))
-        self._trim_b = RotaryKnob(0.0, 2.0, default=1.0)
+        self._trim_b = RotaryKnob(0.0, 2.0, default=1.0, size=_KNOB_MIXER)
         row1.addWidget(self._trim_b)
         row1.addStretch(1)
         box.addLayout(row1)
+        self._bind_value_tip(self._trim_a, lambda v: f"TRIM A ×{v:.2f}")
+        self._bind_value_tip(self._trim_b, lambda v: f"TRIM B ×{v:.2f}")
         # 行2：EQ A/B（低中高旋钮）
         row2 = QHBoxLayout()
+        row2.setSpacing(_SP_LG)
         self._eq_a_sliders = {}
         self._eq_b_sliders = {}
         for title, knobs in (("A", self._eq_a_sliders), ("B", self._eq_b_sliders)):
             col = QVBoxLayout()
+            col.setSpacing(_SP_SM)
             col.addWidget(QLabel(f"{title} EQ"))
             for band in ("低", "中", "高"):
                 r = QHBoxLayout()
+                r.setSpacing(_SP_SM)
                 r.addWidget(QLabel(band))
-                k = RotaryKnob(-1.0, 1.0, default=0.0)
+                k = RotaryKnob(-1.0, 1.0, default=0.0, size=_KNOB_MIXER)
                 k.setObjectName(f"{title}-{band}")
                 r.addWidget(k)
                 col.addLayout(r)
                 knobs[band] = k
+                # J0.7：EQ Tooltip 显示 dB（+1 → +6dB / -1 → -30dB）
+                self._bind_value_tip(
+                    k,
+                    lambda v, b=f"{title}-{band}": (
+                        f"{b} EQ {EQ_GAIN_DB[0] * v if v >= 0 else EQ_GAIN_DB[1] * abs(v):+.1f} dB"
+                    ),
+                )
             row2.addLayout(col)
-            row2.addSpacing(12)
         row2.addStretch(1)
         box.addLayout(row2)
         # 行3：VU + FaderStart + Tap（A/B 两列）
         row3 = QHBoxLayout()
+        row3.setSpacing(_SP_LG)
         for letter in ("a", "b"):
             col = QVBoxLayout()
+            col.setSpacing(_SP_SM)
             label = letter.upper()
             col.addWidget(QLabel(f"{label} VU"))
-            meter = LedStrip()  # I2.3：段数走 ui.json led_segments（原显式 12 双处）
+            meter = LedStrip()  # I2.3：段数走 ui.json led_segments
             setattr(self, f"_vu_{letter}", meter)
             col.addWidget(meter)
-            fs = GlowButton(f"{label} FaderStart")
+            fs = GlowButton(f"{label} FS")  # PL001.5：短名防截断（tooltip 全名）
             fs.setCheckable(True)
+            fs.setToolTip("Fader Start：开启后推子从 0 推起 = 播放、拉到底 = 停止")
             setattr(self, f"_fs_{letter}", fs)
             col.addWidget(fs)
-            tap = GlowButton(f"{label} Tap")
+            tap = GlowButton("TAP")  # PL001.5：短名（A/B 由列上下文区分）
+            tap.setToolTip(f"DECK {label} Tap：连续点按测 BPM（取中值），用于无分析数据的曲目")
             setattr(self, f"_tap_{letter}", tap)
             col.addWidget(tap)
             row3.addLayout(col)
-            row3.addSpacing(12)
         row3.addStretch(1)
         box.addLayout(row3)
         # 行4：横推（水平）
         row4 = QHBoxLayout()
         xf_col = QVBoxLayout()
+        xf_col.setSpacing(_SP_SM)
         xf_col.addWidget(QLabel("横推"))
-        self._xfader = FaderSlider(-1.0, 1.0, 0.0, Qt.Horizontal, length=140)
+        self._xfader = FaderSlider(-1.0, 1.0, 0.0, Qt.Horizontal, length=s(140))
+        self._bind_value_tip(
+            self._xfader,
+            lambda v: (
+                f"横推 L {int((1 - (v + 1) / 2) * 100)}% / R {int((v + 1) / 2 * 100)}%"
+            ),
+        )
         xf_col.addWidget(self._xfader)
         row4.addLayout(xf_col, 1)
         box.addLayout(row4)
+        # 行5：耳机监听区（J1.0 启用：CUE A/B 独占预听 + 音量；平衡预留双源混音）
+        row5 = QHBoxLayout()
+        row5.setSpacing(_SP_SM)
+        row5.addWidget(QLabel("PHONES"))
+        self._phones_cue_a = GlowButton("CA")  # PL001.5：短名防截断
+        self._phones_cue_b = GlowButton("CB")
+        self._phones_bal = RotaryKnob(-1.0, 1.0, default=0.0, size=_KNOB_FX)
+        self._phones_vol = RotaryKnob(0.0, 1.0, default=1.0, size=_KNOB_FX)
+        self._phones_cue_a.setToolTip("耳机预听 DECK A（CUE A；再次点击停止；需可用输出设备）")
+        self._phones_cue_b.setToolTip("耳机预听 DECK B（CUE B；再次点击停止；需可用输出设备）")
+        self._phones_bal.setEnabled(False)
+        self._phones_bal.setToolTip("监听平衡（预留：需双源混合监听，v2 接入）")
+        self._phones_vol.setToolTip("监听音量")
+        row5.addWidget(self._phones_cue_a)
+        row5.addWidget(self._phones_cue_b)
+        row5.addWidget(self._phones_bal)
+        row5.addWidget(self._phones_vol)
+        row5.addStretch(1)
+        box.addLayout(row5)
         return panel
 
+    def _bind_value_tip(self, wgt, fmt) -> None:
+        # J0.7：控件数值实时 Tooltip（hover 显示当前值，变化即更新）
+        wgt.setToolTip(fmt(wgt.value()))
+        wgt.valueChanged.connect(lambda v: wgt.setToolTip(fmt(v)))
+
     def _build_effects_panel(self) -> QWidget:
-        # 构建 Effects 面板：MASTER 旋钮 + Beat FX + 转场按钮（G3.5 导入已上移顶层）
+        # 构建 Effects 面板：MASTER 旋钮 + Beat FX + FX 状态小屏 + 转场按钮
         panel = PanelFrame("EFFECTS")
         box = QVBoxLayout(panel)
-        box.setContentsMargins(8, 8, 8, 8)
-        self._volume = RotaryKnob(0.0, 2.0, default=1.0)
+        box.setContentsMargins(_SP_MD, _SP_MD, _SP_MD, _SP_MD)
+        box.setSpacing(_SP_MD)
+        self._volume = RotaryKnob(0.0, 2.0, default=1.0, size=_KNOB_MIXER)
+        self._bind_value_tip(self._volume, lambda v: f"主音量 ×{v:.2f}")
         master_row = QHBoxLayout()
+        master_row.setSpacing(_SP_SM)
         master_row.addWidget(QLabel("MASTER"))
         master_row.addWidget(self._volume)
         master_row.addStretch(1)
         box.addLayout(master_row)
         self._beat_fx = BeatFxWidget()
         box.addWidget(self._beat_fx, 1)
+        # J0.7：FX 状态小屏（目标盘 + 效果 + 开关显性化）
+        fx_row = QHBoxLayout()
+        fx_row.setSpacing(_SP_SM)
+        fx_row.addWidget(QLabel("FX 状态"))
+        self._fx_status = MiniDisplay()
+        self._fx_status.setFixedSize(s(120), s(20))  # J4 缩放
+        fx_row.addWidget(self._fx_status, 1)
+        box.addLayout(fx_row)
         # 转场（FLX4 无此部件，保留功能：Prepare/Mix）
         self._prepare_btn = GlowButton("Prepare 来曲")
+        self._prepare_btn.setToolTip("以目标盘为当前曲、选中曲为来曲，预渲染变速转场缓冲")
         self._mix_btn = GlowButton("Mix Now")
         self._mix_btn.set_led(True, _UI.get("glow_orange", "#ff7a2f"))
+        self._mix_btn.setToolTip("在下一个下拍（或立即）混入已预备的来曲")
         tr_col = QVBoxLayout()
+        tr_col.setSpacing(_SP_SM)
         tr_col.addWidget(self._prepare_btn)
         tr_col.addWidget(self._mix_btn)
         box.addLayout(tr_col)
+        self._update_fx_status()
         return panel
+
+    def _update_fx_status(self) -> None:
+        # FX 状态行刷新（J0.7；J1.1 起显示 FX 通道而非目标盘；效果名大写对齐硬件观感）
+        if self._beat_fx.is_on() and self._beat_fx_effect:
+            ch = {"1": "A", "2": "B", "both": "A+B"}.get(self._fx_channel, "A")
+            text = f"{ch} {self._beat_fx_effect.upper()} ON"
+        else:
+            text = "-- OFF"
+        self._fx_status.set_text(text)
 
     def _add_perf_key(self, name: str) -> GlowButton:
         # 构建表演功能键（Slip/Censor/Stutter；均为勾选语义）
@@ -370,6 +554,21 @@ class MainWindow(QMainWindow):
             )
             widget.keylock_toggled.connect(lambda on, d=deck: self._on_keylock(d, on))
             widget.pitch_changed.connect(lambda v, d=deck: self._on_pitch(d, v))
+            # J1.0 循环键行 + Beat Sync
+            widget.loop_in_clicked.connect(lambda d=deck: self._loop_action(d, "in"))
+            widget.loop_out_clicked.connect(lambda d=deck: self._loop_action(d, "out"))
+            widget.loop_fourbeat_clicked.connect(
+                lambda d=deck: self._on_beatloop(d, 4)
+            )
+            widget.loop_halve_clicked.connect(
+                lambda d=deck: self._loop_action(d, "halve")
+            )
+            widget.loop_double_clicked.connect(
+                lambda d=deck: self._loop_action(d, "double")
+            )
+            widget.sync_toggled.connect(
+                lambda on, l=deck_letter: self._on_sync(l, on)
+            )
         self._connect_eq(self._eq_a_sliders, self._engine.deck_a)
         self._connect_eq(self._eq_b_sliders, self._engine.deck_b)
         # --- E2 信号接线 ---
@@ -399,10 +598,18 @@ class MainWindow(QMainWindow):
             pad.pad_clicked.connect(
                 lambda idx, mode, d=deck, l=letter: self._on_pad(l, d, idx, mode)
             )
-        # Beat FX（作用目标盘）
+        # Beat FX（J1.1：通道选择 + 拍数 + AUTO/TAP 全接线）
         self._beat_fx.fx_changed.connect(self._on_beat_fx_fx)
         self._beat_fx.depth_changed.connect(self._on_beat_fx_depth)
         self._beat_fx.onoff_changed.connect(self._on_beat_fx_onoff)
+        self._beat_fx.channel_changed.connect(self._on_beat_fx_channel)
+        self._beat_fx.beats_changed.connect(self._on_beat_fx_beats)
+        self._beat_fx.bpm_auto.connect(self._on_fx_auto)
+        self._beat_fx.bpm_tap.connect(self._on_fx_tap)
+        # 耳机监听（J1.0）
+        self._phones_cue_a.clicked.connect(lambda: self._on_cue_preview("a"))
+        self._phones_cue_b.clicked.connect(lambda: self._on_cue_preview("b"))
+        self._phones_vol.valueChanged.connect(self._on_cue_volume)
         # 表演键（E2.8）
         self._slip_btns["a"].toggled.connect(self._engine.deck_a.slip_toggle)
         self._slip_btns["b"].toggled.connect(self._engine.deck_b.slip_toggle)
@@ -410,6 +617,12 @@ class MainWindow(QMainWindow):
         self._censor_btns["b"].toggled.connect(self._engine.deck_b.censor)
         for letter, deck in (("a", self._engine.deck_a), ("b", self._engine.deck_b)):
             self._stutter_btns[letter].clicked.connect(deck.stutter)
+        # J0.8：Ctrl+F 聚焦搜索框
+        focus_search = QShortcut(QKeySequence("Ctrl+F"), self)
+        focus_search.activated.connect(self._search.setFocus)
+        # J2：Ctrl+T 运行期主题切换（dark/light 循环，全控件刷新无重启）
+        cycle_theme = QShortcut(QKeySequence("Ctrl+T"), self)
+        cycle_theme.activated.connect(self._cycle_theme)
 
     def _connect_eq(self, knobs: dict, deck) -> None:
         # 连接一组 EQ 旋钮到指定盘的三频 setter（RotaryKnob float 值直接映射）
@@ -432,6 +645,7 @@ class MainWindow(QMainWindow):
             return 0
         self._library = []
         self._table.setRowCount(0)
+        self._update_lib_hint()  # PL001.13：清库后引导句回归
         if records is not None:
             for path in files:
                 rec = records.get(path) or analyzer_mod.empty_record()
@@ -480,6 +694,7 @@ class MainWindow(QMainWindow):
             {"path": path, "bpm": bpm, "key": key, "energy": energy, "record": rec}
         )
         self._table.item(row, 0).setData(Qt.UserRole, path)
+        self._update_lib_hint()  # PL001.13：有行即隐藏引导句
 
     def _filter_table(self, text: str) -> None:
         # 搜索过滤：隐藏不匹配行（简单包含匹配）
@@ -505,6 +720,7 @@ class MainWindow(QMainWindow):
         widget = getattr(self, f"deck_widget_{letter}")
         widget.set_track(path, entry["bpm"], entry["key"], audio)
         widget.set_playing_state(True)
+        self._reset_tempo_ui(letter)  # J1.1：新曲重置 TEMPO/量程反显/Sync
         self._deck_meta[letter] = {
             "path": path,
             "bpm": entry["bpm"],
@@ -559,6 +775,7 @@ class MainWindow(QMainWindow):
             other_widget = getattr(self, f"deck_widget_{other}")
             other_widget.set_track(path, entry["bpm"], entry["key"], audio)
             other_widget.set_playing_state(True)
+            self._reset_tempo_ui(other)  # J1.1：Instant Doubles 同样重置 TEMPO 域
             self._deck_meta[other] = {
                 "path": path,
                 "bpm": entry["bpm"],
@@ -593,13 +810,118 @@ class MainWindow(QMainWindow):
         else:
             self._status("当前盘 BPM 未知，无法 Beatloop")
 
+    # --- TEMPO / Keylock / Sync / 循环（J1.0/J1.1） ---
+
+    def _tempo_tip(self, letter: str, v: float) -> str:
+        # TEMPO 推子 Tooltip：显示乐速倍率与当前量程下百分比
+        pct = self._tempo_range[letter]
+        rate = 1.0 + v * pct / 100.0
+        return f"TEMPO {letter.upper()} ×{rate:.3f}（{v * pct:+.1f}%）"
+
+    def _on_tempo(self, letter: str, v: float) -> None:
+        # TEMPO 推子 → 乐速倍率（J1.1 P4）：Keylock 关=实时变速 / 开=重渲染
+        # 不变调；Pitch 滑块只读反显；手动动推子解除该盘 Beat Sync
+        rate = 1.0 + v * self._tempo_range[letter] / 100.0
+        deck = getattr(self._engine, f"deck_{letter}")
+        deck.set_tempo_rate(rate)
+        widget = getattr(self, f"deck_widget_{letter}")
+        widget.set_pitch_display((rate - 1.0) * 100.0)
+        if self._sync_on[letter]:
+            self._sync_on[letter] = False
+            widget.set_sync_active(False)
+            self._status(f"DECK {letter.upper()} Beat Sync 解除（手动 TEMPO）")
+
+    def _cycle_tempo_range(self, letter: str) -> None:
+        # TEMPO 量程循环（J1.1：±6/±10/±16/WIDE，WIDE 幅度=配置最后一档）
+        ranges = self._tempo_ranges or [6, 10, 16, 100]
+        cur = self._tempo_range[letter]
+        idx = ranges.index(cur) if cur in ranges else 0
+        nxt = ranges[(idx + 1) % len(ranges)]
+        self._tempo_range[letter] = nxt
+        btn = getattr(self, f"_tempo_range_btn_{letter}")
+        btn.setText("WIDE" if nxt >= 100 else f"±{nxt}%")
+        # 保持当前乐速：滑块位置重映射到新量程（blockSignals 防回环）
+        deck = getattr(self._engine, f"deck_{letter}")
+        tempo = getattr(self, f"_tempo_{letter}")
+        v = max(-1.0, min(1.0, (deck.tempo_rate - 1.0) / (nxt / 100.0)))
+        tempo.blockSignals(True)
+        tempo.set_value(v)
+        tempo.blockSignals(False)
+        self._status(
+            f"DECK {letter.upper()} TEMPO 量程 {'WIDE' if nxt >= 100 else f'±{nxt}%'}"
+        )
+
     def _on_keylock(self, deck, on: bool) -> None:
-        # Keylock 开关（占位：M1 预渲染管线接入点在转场；此处仅提示）
-        self._status(f"Keylock {'开' if on else '关'}")
+        # Keylock 开关（J1.1 启用）：开 = 乐速变化走 rubberband 重渲染（不变调，
+        # 约 1-2s 渲染延迟去抖合并）；关 = 回实时变速（卸载烘焙回原速域）
+        deck.set_keylock(on)
+        self._status(
+            f"Keylock {'开（乐速变化将重渲染保持音高）' if on else '关（实时变速）'}"
+        )
+
+    def _on_sync(self, letter: str, on: bool) -> None:
+        # Beat Sync（J1.0）：对齐另一盘有效 BPM（乐速倍率钳制当前量程内；
+        # 手动动 TEMPO 推子解除）
+        other = "b" if letter == "a" else "a"
+        other_deck = getattr(self._engine, f"deck_{other}")
+        deck = getattr(self._engine, f"deck_{letter}")
+        widget = getattr(self, f"deck_widget_{letter}")
+        self._sync_on[letter] = on
+        widget.set_sync_active(on)
+        if not on:
+            self._status(f"DECK {letter.upper()} Beat Sync 关")
+            return
+        target = other_deck.effective_bpm
+        my_bpm = deck.bpm
+        if my_bpm <= 0 or target <= 0:
+            self._sync_on[letter] = False
+            widget.set_sync_active(False)
+            self._status(f"DECK {letter.upper()} Sync 失败：双方需已知 BPM")
+            return
+        pct = self._tempo_range[letter] / 100.0
+        rate = max(1.0 - pct, min(1.0 + pct, target / my_bpm))
+        deck.set_tempo_rate(rate)
+        tempo = getattr(self, f"_tempo_{letter}")
+        v = max(-1.0, min(1.0, (rate - 1.0) / pct)) if pct else 0.0
+        tempo.blockSignals(True)
+        tempo.set_value(v)
+        tempo.blockSignals(False)
+        widget.set_pitch_display((rate - 1.0) * 100.0)
+        self._status(
+            f"DECK {letter.upper()} Beat Sync：×{rate:.3f}（对齐 {target:.1f} BPM）"
+        )
+
+    def _reset_tempo_ui(self, letter: str) -> None:
+        # 新曲加载后重置 TEMPO 滑块/Pitch 反显/Sync（引擎 play 已重置乐速域）
+        tempo = getattr(self, f"_tempo_{letter}")
+        tempo.blockSignals(True)
+        tempo.set_value(0.0)
+        tempo.blockSignals(False)
+        widget = getattr(self, f"deck_widget_{letter}")
+        widget.set_pitch_display(0.0)
+        self._sync_on[letter] = False
+        widget.set_sync_active(False)
+
+    def _loop_action(self, deck, action: str) -> None:
+        # 循环键分发（J1.0）：in/out/halve/double + 状态提示
+        if action == "in":
+            deck.loop_in()
+            self._status("循环入点已设（OUT 闭合）")
+        elif action == "out":
+            deck.loop_out()
+            self._status(
+                "循环已闭合激活" if deck.loop_active else "出点需先设入点且晚于入点"
+            )
+        elif action == "halve":
+            deck.loop_halve()
+            self._status("循环长度减半")
+        elif action == "double":
+            deck.loop_double()
+            self._status("循环长度加倍")
 
     def _on_pitch(self, deck, percent: float) -> None:
-        # Pitch 变化（占位：预渲染管线在 D3 转场接入，实时变调后续扩展）
-        self._status(f"Pitch {percent:+.0f}%（预渲染接入待 D3 管线完善）")
+        # Pitch 滑块变化（J1.1 起为 TEMPO 只读反显，手动拖动仅提示语义）
+        self._status(f"Pitch {percent:+.0f}%（量程指示；实时变速请用 TEMPO 推子）")
 
     # --- 转场（D3 集成到 UI） ---
 
@@ -716,14 +1038,126 @@ class MainWindow(QMainWindow):
             else:
                 deck.set_key_shift(semitones)
 
-    def _apply_beat_fx(self) -> None:
-        # 按面板当前状态应用 Beat FX 到目标盘（效果/深度/开关任一变化时统一调用）
-        deck = getattr(self._engine, f"deck_{self._target}")
-        on = self._beat_fx.is_on()  # I1.2：公开接口读取开关状态（不再跨控件访问私有字段）
-        if on and self._beat_fx_effect:
-            deck.set_fx(self._beat_fx_effect, self._beat_fx_depth)
+    # --- Beat FX 通道/拍数/AUTO/TAP（J1.1 接线） ---
+
+    def _fx_channel_decks(self) -> list:
+        # FX 通道 → 目标盘列表（CH1/CH2/1+2，取代原"目标盘"语义）
+        return {
+            "1": [self._engine.deck_a],
+            "2": [self._engine.deck_b],
+            "both": [self._engine.deck_a, self._engine.deck_b],
+        }.get(self._fx_channel, [self._engine.deck_a])
+
+    def _on_beat_fx_channel(self, ch: str) -> None:
+        # FX 通道切换：清旧通道效果、应用新通道（防效果残留到非通道盘）
+        self._fx_channel = ch
+        for d in (self._engine.deck_a, self._engine.deck_b):
+            d.set_fx("", 0.0)
+        self._apply_beat_fx()
+        label = {"1": "A", "2": "B", "both": "A+B"}.get(ch, "A")
+        self._status(f"FX 通道：{label}")
+
+    def _on_beat_fx_beats(self, beats: int) -> None:
+        # 拍数接线（J1.1）：Echo/Delay 延迟 = beats/4 拍、Trans 门控周期随 BPM
+        self._fx_beats = beats
+        for d in (self._engine.deck_a, self._engine.deck_b):
+            d.set_fx_beats(beats)
+
+    def _on_fx_auto(self) -> None:
+        # AUTO（J1.1）：以曲目 BPM 为 FX 时基（引擎在 set_tempo/Tap 后自动重配延迟）
+        decks = self._fx_channel_decks()
+        if any(d.bpm <= 0 for d in decks):
+            self._status("FX AUTO：通道内存在无 BPM 的盘（先加载曲目或 Tap）")
+            return
+        for d in decks:
+            d.set_fx_beats(self._fx_beats)
+        self._status("FX AUTO：以曲目 BPM 为时基")
+
+    def _on_fx_tap(self) -> None:
+        # TAP（J1.1）：点按测速作为 FX 时基（取通道第一盘）
+        bpm = self._fx_channel_decks()[0].tap()
+        if bpm > 0:
+            self._status(f"FX TAP BPM: {bpm:.1f}")
         else:
-            deck.set_fx("", 0.0)
+            self._status("FX TAP：连续点按至少 2 次")
+
+    def _apply_beat_fx(self) -> None:
+        # 按面板当前状态应用 Beat FX 到通道盘（效果/深度/开关变化统一调用）
+        on = self._beat_fx.is_on()  # I1.2：公开接口读取开关状态
+        for deck in self._fx_channel_decks():
+            if on and self._beat_fx_effect:
+                deck.set_fx(self._beat_fx_effect, self._beat_fx_depth)
+            else:
+                deck.set_fx("", 0.0)
+        self._update_fx_status()  # J0.7：状态小屏联动
+
+    # --- 耳机监听（J1.0） ---
+
+    def _on_cue_preview(self, letter: str) -> None:
+        # 耳机预听（独占切换）：播放该盘当前位置到曲尾；再点同盘停止
+        player = self._engine.ensure_cue_player()
+        if player is None or player.is_dead:
+            self._status("耳机监听不可用（无可用输出设备）")
+            return
+        if self._cue_active == letter:
+            player.stop()
+            self._cue_active = None
+            getattr(self, f"_phones_cue_{letter}").set_led(False)
+            self._status(f"DECK {letter.upper()} 监听停止")
+            return
+        deck = getattr(self._engine, f"deck_{letter}")
+        buf = deck.cue_buffer()
+        if buf is None or len(buf) == 0:
+            self._status(f"DECK {letter.upper()} 无音频可监听")
+            return
+        player.play(buf)
+        self._cue_active = letter
+        for l in ("a", "b"):
+            getattr(self, f"_phones_cue_{l}").set_led(
+                l == letter, _UI.get("glow_green", "#2fe37a")
+            )
+        self._status(f"DECK {letter.upper()} 监听中")
+
+    def _on_cue_volume(self, v: float) -> None:
+        # 监听音量（J1.0）
+        player = self._engine.ensure_cue_player()
+        if player is not None:
+            player.set_volume(v)
+
+    # --- 主题切换（J2 批次 2） ---
+
+    def _cycle_theme(self) -> None:
+        # Ctrl+T：dark/light 循环切换（token 表 + QSS 重建；控件经 ThemeBus
+        # 清缓存重绘；静态 LED 按新主题重涂）
+        name = "light" if palette.current() == "dark" else "dark"
+        from ui.themes import switch_theme
+
+        if not switch_theme(QApplication.instance(), name):
+            self._status(f"未知主题：{name}")
+            return
+        self._apply_static_leds()
+        self._status(f"主题切换：{name}（Ctrl+T 循环）")
+
+    def _apply_static_leds(self) -> None:
+        # 静态 LED 基色按当前主题重涂（动态 LED——播放键/Pad/滑行键——由 _tick
+        # 周期性重涂无需处理；此处覆盖 LOAD/SHIFT/SYNC/监听/Beat FX 效果键）
+        orange = palette.token("glow_orange", "#ff7a2f")
+        blue = palette.token("glow_blue", "#2f8bff")
+        green = palette.token("glow_green", "#2fe37a")
+        self._load_a_btn.set_led(True, orange)
+        self._load_b_btn.set_led(True, orange)
+        self._mix_btn.set_led(True, orange)
+        self._shift_btn.set_led(self._shift.is_shift(), blue)
+        for letter in ("a", "b"):
+            deck = getattr(self._engine, f"deck_{letter}")
+            playing = deck.state in (State.PLAYING, State.MIXING) and not deck.paused
+            widget = getattr(self, f"deck_widget_{letter}")
+            widget.set_playing_state(playing)
+            widget.set_sync_active(self._sync_on[letter])
+            getattr(self, f"_phones_cue_{letter}").set_led(
+                self._cue_active == letter, green
+            )
+        self._beat_fx.reapply_leds()
 
     def _on_beat_fx_fx(self, fx: str) -> None:
         # Beat FX 效果类型变化：记录并应用
@@ -742,7 +1176,13 @@ class MainWindow(QMainWindow):
         self._apply_beat_fx()
 
     def keyPressEvent(self, event) -> None:
-        # 键盘 SHIFT 驱动全局修饰状态（E2.1）
+        # 键盘 SHIFT 驱动全局修饰状态（E2.1）；空格 = 播放/暂停目标盘（J0.8，
+        # 子控件持有焦点时由子控件消费按键，不影响搜索框输入空格）
+        if event.key() == Qt.Key_Space:
+            self._toggle_play(getattr(self._engine, f"deck_{self._target}"))
+            self._status(f"空格：DECK {self._target.upper()} 播放/暂停")
+            event.accept()
+            return
         if event.key() == Qt.Key_Shift:  # Qt.Key_Shift
             self._shift.set_active(True)
             self._shift_btn.setChecked(True)
@@ -802,6 +1242,7 @@ class MainWindow(QMainWindow):
         # 切换目标盘 A/B（双击加载与转场作用对象）
         self._target = "b" if self._target == "a" else "a"
         self._target_btn.setText(f"目标盘: {self._target.upper()}")
+        self._update_fx_status()  # J0.7：状态小屏联动
         self._status(f"目标盘切换为 DECK {self._target.upper()}")
 
     def _open_folder(self) -> None:
@@ -840,9 +1281,16 @@ class MainWindow(QMainWindow):
 #   _toggle_play/_on_cue/_on_beatloop/_on_keylock/_on_pitch：DeckWidget 信号处理
 #   _on_prepare/_on_prepared_done/_on_mix：TransitionManager 集成（D3 复用）
 #   _tick：100ms 刷新进度/播放头/播放状态
+#   _bind_value_tip(wgt, fmt)：控件数值实时 Tooltip（J0.7）
+#   _update_fx_status()：FX 状态小屏刷新（J0.7，目标盘/效果/开关）
+#   _apply_splitter_sizes()：两级 splitter 确定性尺寸（PL001.1：body 按窗宽
+#     百分比、main = 各列最小宽 + 富余按份额分配——构造与 show 后各一次；
+#     原百分比 setSizes 总和超主区被压缩+钳制是列宽失真根因）
+#   _update_lib_hint()：空库引导句显隐（PL001.13，rowCount==0 时可见）
 #   _toggle_target/_open_folder/_status/closeEvent：目标盘/文件对话框/状态栏/关闭
 # 设计理由：UI 只发指令（信号→引擎方法，B1 纪律）；引擎/转场注入便于无头测试；
 #   后台分析经 QueuedConnection 回主线程（Qt 线程安全）
 # 异常处理：加载/引擎关闭异常捕获不崩溃（AGENTS.md 错误策略）；分析失败曲目降级空记录
 # 关联配置：config/static/base.json（window_width/height/sample_rate）；
-#   ui.json（colors/jog_bend_reset_ms/table_headers，H3.5 补全）
+#   ui.json（colors/jog_bend_reset_ms/table_headers，H3.5 补全；
+#   splitter_*/spacing_*/knob_size_*/button_min_*，J0.1/J0.3 补全）
