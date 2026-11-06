@@ -44,8 +44,15 @@ class WaveformWidget(ThemeAware, QWidget):
         self._peaks: np.ndarray = np.zeros((1, 2), dtype=np.float32)
         self._position: int = 0
         self._duration: int = 0
+        self._grid: list[int] = []  # 下拍样本位置（PATCH001.3：对拍网格）
         self.setMinimumHeight(56)
         self.bind_theme()  # J2
+
+    def set_grid(self, downbeats: list) -> None:
+        # 设置下拍网格（样本位置列表，PATCH001.3）：随 set_audio 的 _duration
+        # 映射为像素竖线；空列表 = 不绘制
+        self._grid = [int(d) for d in (downbeats or []) if 0 <= int(d)]
+        self.update()
 
     def set_audio(self, audio: np.ndarray | None) -> None:
         # 载入音频：按当前控件宽度降采样峰值缓存；播放头清零
@@ -75,6 +82,14 @@ class WaveformWidget(ThemeAware, QWidget):
             painter.drawRect(0, 0, w - 1, h - 1)
             painter.end()
             return
+        # PATCH001.3：下拍网格（包络前绘制，accent 低对比——对拍可视化，
+        # 波形包络主导视觉）；样本位置按 _duration 比例映射
+        if self._grid and self._duration > 0:
+            painter.setPen(QPen(QColor(fg.red(), fg.green(), fg.blue(), 40), 1))
+            for d in self._grid:
+                if 0 <= d <= self._duration:
+                    x = int(d / self._duration * (w - 1))
+                    painter.drawLine(x, 0, x, h - 1)
         # 峰值索引 → 像素列
         pen = QPen(fg, 1)
         painter.setPen(pen)

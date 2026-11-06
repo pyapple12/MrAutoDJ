@@ -711,6 +711,24 @@ H 系列 19 项修复在位（除 H0.1 漏改）；配置键 40 个与读取方�
 
 - 人声冲突维度（决策 1）与 LLM 参与（M3）；不引入 mutagen/Demucs 新依赖；不做全局最优 Set（贪心够用）；不改 M1.7 已有转场机制（对齐/epoch/skip-stretch 全复用）；UI 不做 Set 时间线可视化（远期）
 
+---
+
+## 附录 PATCH001：UI 小修与对拍可视化（面板标题占位 / 曲库列宽 / 波形下拍网格）
+
+> 立项：2026-11-06（用户：M2 听感验收通过、小问题修复、继续优化）。三件小修：① P5 面板标题重叠（y.problem#P5 转实施）② 曲库表"调性/能量"列被裁（PL001 评审遗留——库列 320px 放不下 5 列默认宽）③ 波形下拍网格（对拍可视化，M2 后续项——M2 闭环后解锁）。
+> 状态：✅ **已实施**（2026-11-06，PATCH001 4/4 勾结；probe_patch001 PASS（并抓出 waveform paintEvent 变量顺序 NameError 真 GUI 崩溃）+ 25/25 回归 + 截图读图；已知权衡：密集包络段下拍网格被波形淹没（alpha 40 包络主导），安静段可见。提交 V0.2.7.2 由用户执行）
+
+### 措施（文件/函数级）
+
+1. **P5 面板标题占位**——`ui/widgets/panel_frame.py`：新增模块常量 `CONTENT_TOP_MARGIN = 26`（标题行 6..24 + 2px 空隙）；`ui/main_window.py` 五处面板内容布局顶边距 8/`_SP_MD` → `CONTENT_TOP_MARGIN`（browse/lib/deck/mixer/effects——`setContentsMargins` 第二参）；PanelFrame 标题 QLabel 保持（占位后无重叠）
+2. **曲库列宽**——`ui/main_window.py _build_ui()`：表格建列后设固定宽（状态 40 / BPM 60 / 调性 64 / 能量 48），曲名列走既有 stretchLastSection 弹性吸收剩余——五列在 280px 最小库列下全部可见；验证：probe 断言四列宽之和 ≤ 库面板内容宽
+3. **波形下拍网格**——`ui/waveform_widget.py`：新增 `set_grid(downbeats: list[int])`（样本位置列表，转 x 时按 `_duration` 比例映射）；`paintEvent` 在波形包络**之前**绘制淡网格竖线（accent 色 alpha 40——下拍 1px 线，包络主导视觉）；`ui/main_window.py _load_track_to/Instant Doubles` 传入 `entry["record"].get("downbeats")`；验证：probe 断言网格存储/映射在宽内/双击换曲更新
+
+### 验证
+
+- `.temp/probe_patch001.py`：标题占位（面板子控件 y ≥ CONTENT_TOP_MARGIN）/ 列宽和 ≤ 内容宽 / 网格存储与映射断言 + 双主题 grab 不崩；全量回归 + 截图
+
+
 ### 一、目标
 
 1. **可读性**：1650×800 默认窗宽下全部按钮文本完整可读，曲库列保持 ≥260px 不塌缩

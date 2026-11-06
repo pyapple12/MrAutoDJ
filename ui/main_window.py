@@ -43,7 +43,7 @@ from ui.widgets.fader_slider import FaderSlider
 from ui.widgets.glow_button import GlowButton
 from ui.widgets.led_strip import LedStrip
 from ui.widgets.mini_display import MiniDisplay
-from ui.widgets.panel_frame import PanelFrame
+from ui.widgets.panel_frame import CONTENT_TOP_MARGIN, PanelFrame
 from ui.widgets.rotary_knob import RotaryKnob
 from utils.logger import get_logger
 
@@ -162,7 +162,7 @@ class MainWindow(QMainWindow):
         # --- Browse 区（顶部面板，J0.2：LOAD 组 / 搜索组 / 状态组 + Tooltip） ---
         browse_panel = PanelFrame("BROWSE")
         browse = QHBoxLayout(browse_panel)
-        browse.setContentsMargins(_SP_LG, _SP_MD, _SP_LG, _SP_MD)
+        browse.setContentsMargins(_SP_LG, CONTENT_TOP_MARGIN, _SP_LG, _SP_MD)  # PATCH001.1 标题占位
         browse.setSpacing(_SP_SM)
         self._load_a_btn = GlowButton("LOAD A")
         self._load_a_btn.set_led(True, _UI.get("glow_orange", "#ff7a2f"))
@@ -196,7 +196,7 @@ class MainWindow(QMainWindow):
         # 曲库面板
         lib_panel = PanelFrame("LIBRARY")
         lib_box = QVBoxLayout(lib_panel)
-        lib_box.setContentsMargins(8, 8, 8, 8)
+        lib_box.setContentsMargins(8, CONTENT_TOP_MARGIN, 8, 8)  # PATCH001.1 标题占位
         self._table_headers = _UI.get(
             "table_headers", ["状态", "曲名", "BPM", "调性", "能量"]
         )
@@ -205,6 +205,10 @@ class MainWindow(QMainWindow):
         self._table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectRows)
         self._table.horizontalHeader().setStretchLastSection(True)
+        # PATCH001.2：定宽四列（曲名走 stretchLastSection 弹性）——280px 最小
+        # 库列下五列全部可见（原默认宽 100×5 裁掉调性/能量）
+        for col, width in ((0, 40), (2, 60), (3, 64), (4, 48)):
+            self._table.setColumnWidth(col, width)
         lib_box.addWidget(self._table)
         # PL001.13：空库引导句（empty keeps frame + 一句话；有行即隐藏）
         self._lib_hint = QLabel("打开文件夹加载曲库 · 双击曲目加载到目标盘")
@@ -331,7 +335,7 @@ class MainWindow(QMainWindow):
         # Pad 区独立于转盘区的行分布）
         panel = PanelFrame(name)
         box = QVBoxLayout(panel)
-        box.setContentsMargins(_SP_MD, _SP_MD, _SP_MD, _SP_MD)
+        box.setContentsMargins(_SP_MD, CONTENT_TOP_MARGIN, _SP_MD, _SP_MD)  # PATCH001.1
         box.setSpacing(_SP_SM)
         box.addWidget(wdg, 1)
         # 上排：Jog + TEMPO 竖置位（实时变速 + 量程循环；Pitch 滑块只读反显）
@@ -369,7 +373,7 @@ class MainWindow(QMainWindow):
         # + 耳机监听区预留（J0.5）
         panel = PanelFrame("MIXER")
         box = QVBoxLayout(panel)
-        box.setContentsMargins(_SP_MD, _SP_MD, _SP_MD, _SP_MD)
+        box.setContentsMargins(_SP_MD, CONTENT_TOP_MARGIN, _SP_MD, _SP_MD)  # PATCH001.1
         box.setSpacing(_SP_MD)
         # 行1：TRIM A/B（J0.3：Mixer 旋钮 32 分级；J0.7：数值 Tooltip）
         row1 = QHBoxLayout()
@@ -481,7 +485,7 @@ class MainWindow(QMainWindow):
         # 构建 Effects 面板：MASTER 旋钮 + Beat FX + FX 状态小屏 + 转场按钮
         panel = PanelFrame("EFFECTS")
         box = QVBoxLayout(panel)
-        box.setContentsMargins(_SP_MD, _SP_MD, _SP_MD, _SP_MD)
+        box.setContentsMargins(_SP_MD, CONTENT_TOP_MARGIN, _SP_MD, _SP_MD)  # PATCH001.1
         box.setSpacing(_SP_MD)
         self._volume = RotaryKnob(0.0, 2.0, default=1.0, size=_KNOB_MIXER)
         self._bind_value_tip(self._volume, lambda v: f"主音量 ×{v:.2f}")
@@ -748,6 +752,7 @@ class MainWindow(QMainWindow):
         deck.set_tempo(entry["bpm"])
         widget = getattr(self, f"deck_widget_{letter}")
         widget.set_track(path, entry["bpm"], entry["key"], audio)
+        widget.waveform.set_grid(entry["record"].get("downbeats", []))  # PATCH001.3 下拍网格
         widget.set_playing_state(True)
         self._reset_tempo_ui(letter)  # J1.1：新曲重置 TEMPO/量程反显/Sync
         self._deck_meta[letter] = {
@@ -809,6 +814,7 @@ class MainWindow(QMainWindow):
             )  # H0.4：公开方法持锁 seek
             other_widget = getattr(self, f"deck_widget_{other}")
             other_widget.set_track(path, entry["bpm"], entry["key"], audio)
+            other_widget.waveform.set_grid(entry["record"].get("downbeats", []))  # PATCH001.3
             other_widget.set_playing_state(True)
             self._reset_tempo_ui(other)  # J1.1：Instant Doubles 同样重置 TEMPO 域
             self._deck_meta[other] = {

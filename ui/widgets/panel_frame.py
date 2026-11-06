@@ -13,6 +13,9 @@ from ui.widgets import _textures
 
 # 静态配置解包（面板圆角；配色改渲染时经 palette 现取，J2 批次 2）
 _RADIUS = 10  # 面板圆角
+# 标题占位高度（PATCH001.1：内容布局顶边距下限——标题 QLabel 占 6..24，
+# 面板子内容须从 ≥26 起，否则与丝印标题叠字，y.problem#P5）
+CONTENT_TOP_MARGIN = 26
 
 
 class PanelFrame(ThemeAware, QFrame):

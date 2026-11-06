@@ -51,14 +51,16 @@
 
 ## 📌 待修复
 
-### P5. PanelFrame 丝印标题与面板首行内容重叠（2026-11-05 记录，PL001 评审发现）
+（当前无待修复项）
 
-- 状态：📌 待修复（外观层；来源 = PL001 评审 after 截图，M1.6 起既有）
-- 现象：`PanelFrame` 标题 QLabel 固定 `move(12, 6)` 叠在面板左上角，与面板内第一个子控件（如 DeckWidget 的曲名信息行、Effects 的 MASTER 行）文字重叠，两行字互相穿插
-- 未来方案：
-  - PanelFrame 增加标题保留高度：`__init__` 时对内容布局施加顶部 margin（约 20px），或标题改绘入静态层 QPixmap（不再用 QLabel 叠放）——二选一取简
-  - 涉及：`ui/widgets/panel_frame.py`（`_make_label`/`_render_cache`）、四个面板构建处的 contentsMargins
-  - 工作量：小（半小时级）；与 PL001 的 QSS 透明化无冲突
+---
+
+## ✅ 已修复（续）
+
+### P5. PanelFrame 丝印标题与面板首行内容重叠 ✅
+
+- 状态：✅ 已修复（2026-11-06，PATCH001.1——内容布局顶边距统一 `CONTENT_TOP_MARGIN=26`，五面板生效；探针断言首子控件 y ≥ 26 + 截图目检丝印标题独立成行）
+- 关联：z.plan.md 附录 PATCH001；任务组 x.progress.md PATCH001.1
 
 ---
 

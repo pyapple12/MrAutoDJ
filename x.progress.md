@@ -431,4 +431,15 @@
 #### 组 E：检验与收尾
 
 - [x] PL002.14 全量回归 —— probe_pl002_score/set/bridge 全 PASS + 既有 22 探针重跑（g1/i2 缓存断言观察 V2 重分析自愈）+ 冒烟 + Effects 推荐区截图；验证：RESULT 全 PASS（2026-11-05 已验证：25/25 探针 PASS（22 回归+3 新）+ 冒烟 OK + Effects 截图读图）
-- [x] PL002.15 文档与提交 —— README 特性补 M2 段落、z.plan 里程碑 M2 勾选 + 本附录状态回写、x.progress 勾选、live 用户验收（真曲库 Auto Next 单步 + AUTO 短 Set 听感）、提交（四段式 V0.2.7.0，用户执行）（2026-11-05 已验证：README M2 段落/本组勾选/附录状态回写完成；live 听感与提交待用户）
+- [x] PL002.15 文档与提交 —— README 特性补 M2 段落、z.plan 里程碑 M2 勾选 + 本附录状态回写、x.progress 勾选、live 用户验收（真曲库 Auto Next 单步 + AUTO 短 Set 听感）、提交（四段式 V0.2.7.0，用户执行）（2026-11-05 已验证：README M2 段落/本组勾选/附录状态回写完成；提交 736029c + 版本收口 aa0c9c1 已推送；**2026-11-06 用户 live 听感验收通过**）
+
+## PATCH（小修小改轨道）
+
+### PATCH001: UI 小修与对拍可视化（面板标题占位 / 曲库列宽 / 波形下拍网格） [用户 2026-11-06 → z.plan.md 附录 PATCH001]
+
+> 三件小修：P5 面板标题重叠（y.problem#P5 转实施）、曲库"调性/能量"列被裁（PL001 评审遗留）、波形下拍网格（M2 对拍可视化）。方案见 z.plan.md 附录 PATCH001。
+
+- [x] PATCH001.1 面板标题占位 —— `panel_frame.py` 新增 `CONTENT_TOP_MARGIN = 26`；`main_window.py` 五处面板内容布局顶边距改用之（browse/lib/deck/mixer/effects）；验证：probe 断言面板首子控件 y ≥ 26（先 FAIL 后 PASS）（2026-11-06 已验证：CONTENT_TOP_MARGIN=26 常量 + 五面板顶边距接入；probe 断言首子控件 y≥26（deck/mixer/effects 全过））
+- [x] PATCH001.2 曲库列宽 —— `_build_ui()` 表格建列后固定宽（状态 40/BPM 60/调性 64/能量 48，曲名弹性）；验证：probe 断言四列宽和 ≤ 库面板内容宽（先 FAIL——当前调性/能量被裁——后 PASS）（2026-11-06 已验证：定宽 40/60/64/48 + 曲名弹性；断言四列和 ≤ 库面板内容宽（调性/能量可见））
+- [x] PATCH001.3 波形下拍网格 —— `waveform_widget.py` 新增 `set_grid(downbeats)` + `paintEvent` 包络前画 accent alpha 40 竖线（样本→x 按 _duration 映射）；`main_window` 两处装填传 `downbeats`；验证：probe 断言网格存储/映射/换曲更新 + 截图目检（2026-11-06 已验证：set_grid + 包络前 alpha 40 竖线；存储/映射/换曲断言过；探针抓出 paintEvent 变量顺序 NameError（真 GUI 崩溃）已修；密集包络段网格被淹没属预期权衡（安静段可见））
+- [x] PATCH001.4 检验与收尾 —— `.temp/probe_patch001.py` 全 PASS + 25 探针回归 + 冒烟 + 截图读图；y.problem P5 改 ✅；文档同步；提交（feat: V0.2.7.2）（2026-11-06 已验证：probe_patch001 PASS + 25/25 回归（j0 版本断言同步 0.2.7）+ 冒烟 + 截图读图（标题占位/列宽目检过）；y.problem P5 ✅）
