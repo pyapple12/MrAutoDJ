@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from utils.convert import to_float
+
 
 def parse_artist(path: str) -> str | None:
     # 文件名艺人解析（宽容约定："Artist - Title.ext" 首个 " - " 分割取左段；
@@ -20,15 +22,16 @@ def parse_artist(path: str) -> str | None:
 
 def entry_from(path: str, record: dict | None) -> dict:
     # 分析记录 → 曲库条目（automix/UI 消费的统一结构；宽容解析——record 缺失
-    # 或字段缺失走零值/占位，与 analyzer.empty_record 语义一致）
+    # 或字段缺失走零值/占位，与 analyzer.empty_record 语义一致；数值走
+    # convert.to_float 宽容转换——FIX004/M4：缓存 JSON 字符串/畸形不炸 UI）
     record = record or {}
     return {
         "path": path,
         "name": Path(path).name,
         "artist": parse_artist(path),
-        "bpm": float(record.get("bpm", 0.0) or 0.0),
+        "bpm": to_float(record.get("bpm"), 0.0),
         "key": record.get("key", "?") or "?",
-        "energy": int(record.get("energy", 0) or 0),
+        "energy": int(to_float(record.get("energy"), 0.0)),
         "timbre": record.get("timbre"),
         "record": record,
     }

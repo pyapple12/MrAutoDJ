@@ -396,12 +396,10 @@
 - [x] PL001.15 探针与全量回归 —— 新建 `.temp/probe_pl001.py`（组 A-D 全部断言，TDD 先 FAIL 后 PASS）；全量 21 既有探针重跑 PASS（p5/p6/j0 的文本/布局断言随 A2-A5 同步更新）；冒烟 import；验证：RESULT 全 PASS（2026-11-05 已验证：probe_pl001 全 PASS + 22/22 探针回归 + 冒烟 OK）
 - [x] PL001.16 after 截图对比与文档 —— 重跑 `.temp/review_shots.py` 出 after 组（dark 空载/加载、light 加载、三特写）与 before 逐项目检（截断清零/无色块/VU 框架/Jog 无叠字/FX ON 描边/空态引导）；多模态读图核对；文档同步（本组勾选 + z.plan 附录 PL001 状态回写 + README 徽章随版本）；提交（四段式 V0.2.6.1，用户执行）（2026-11-05 已验证：after 截图 dark/light×3 特写目检全过；说明区 8 文件同步；y.problem 补 P5）
 
-## 未完成
 
-### PL002: M2 AI 自动 DJ（兼容性评分 / Camelot 选曲 / Set 规划 / 自动转场） [plan#M2 → z.plan.md 附录 PL002]
+### PL002: M2 AI 自动 DJ（兼容性评分 / Camelot 选曲 / Set 规划 / 自动转场） [plan#M2 → z.plan.md 附录 PL002] ✅
 
-> 方案（设计决策/五组措施/验证方案/边界）见 z.plan.md 附录 PL002；核心 = `modules/automix.py` 占位转正（确定性贪心编排，非 LLM）+ 分析器 timbre 字段（缓存 V2）+ TransitionManager 桥与自动循环 + Effects 推荐区 UI。人声冲突维度明确不做（依赖缺位，里程碑偏差已记录）。
-> 执行约定：评分/规划/解析全为纯函数 TDD（先 FAIL 后 PASS）；桥接用假引擎；全量回归关注 g1/i2 缓存断言（V2 首跑重分析属预期）。
+> 结果：四组 15 条全勾（probe_pl002_score/set/bridge 全 PASS + 25/25 全量回归 + Effects 推荐区截图读图）；2026-11-06 用户 live 听感验收通过（AUTO 自动接歌 + 转场 EQ 渐变交接）。人声冲突维度按决策 1 不做（偏差已记录）。已随 V0.2.7.0 提交推送（736029c）。详见 z.plan.md 附录 PL002。
 
 #### 组 A：评分核心（automix.py 纯逻辑）
 
@@ -433,13 +431,97 @@
 - [x] PL002.14 全量回归 —— probe_pl002_score/set/bridge 全 PASS + 既有 22 探针重跑（g1/i2 缓存断言观察 V2 重分析自愈）+ 冒烟 + Effects 推荐区截图；验证：RESULT 全 PASS（2026-11-05 已验证：25/25 探针 PASS（22 回归+3 新）+ 冒烟 OK + Effects 截图读图）
 - [x] PL002.15 文档与提交 —— README 特性补 M2 段落、z.plan 里程碑 M2 勾选 + 本附录状态回写、x.progress 勾选、live 用户验收（真曲库 Auto Next 单步 + AUTO 短 Set 听感）、提交（四段式 V0.2.7.0，用户执行）（2026-11-05 已验证：README M2 段落/本组勾选/附录状态回写完成；提交 736029c + 版本收口 aa0c9c1 已推送；**2026-11-06 用户 live 听感验收通过**）
 
-## PATCH（小修小改轨道）
+### PATCH001: UI 小修与对拍可视化（面板标题占位 / 曲库列宽 / 波形下拍网格） [用户 2026-11-06 → z.plan.md 附录 PATCH001] ✅
 
-### PATCH001: UI 小修与对拍可视化（面板标题占位 / 曲库列宽 / 波形下拍网格） [用户 2026-11-06 → z.plan.md 附录 PATCH001]
-
-> 三件小修：P5 面板标题重叠（y.problem#P5 转实施）、曲库"调性/能量"列被裁（PL001 评审遗留）、波形下拍网格（M2 对拍可视化）。方案见 z.plan.md 附录 PATCH001。
+> 结果：4/4 勾结（probe_patch001 PASS——并抓出 waveform paintEvent 变量顺序真 GUI 崩溃——+ 25/25 回归 + 截图读图）；密集包络段下拍网格被淹没为已声明权衡。已随 V0.2.7.2 提交推送（ebd16b5）。详见 z.plan.md 附录 PATCH001。
 
 - [x] PATCH001.1 面板标题占位 —— `panel_frame.py` 新增 `CONTENT_TOP_MARGIN = 26`；`main_window.py` 五处面板内容布局顶边距改用之（browse/lib/deck/mixer/effects）；验证：probe 断言面板首子控件 y ≥ 26（先 FAIL 后 PASS）（2026-11-06 已验证：CONTENT_TOP_MARGIN=26 常量 + 五面板顶边距接入；probe 断言首子控件 y≥26（deck/mixer/effects 全过））
 - [x] PATCH001.2 曲库列宽 —— `_build_ui()` 表格建列后固定宽（状态 40/BPM 60/调性 64/能量 48，曲名弹性）；验证：probe 断言四列宽和 ≤ 库面板内容宽（先 FAIL——当前调性/能量被裁——后 PASS）（2026-11-06 已验证：定宽 40/60/64/48 + 曲名弹性；断言四列和 ≤ 库面板内容宽（调性/能量可见））
 - [x] PATCH001.3 波形下拍网格 —— `waveform_widget.py` 新增 `set_grid(downbeats)` + `paintEvent` 包络前画 accent alpha 40 竖线（样本→x 按 _duration 映射）；`main_window` 两处装填传 `downbeats`；验证：probe 断言网格存储/映射/换曲更新 + 截图目检（2026-11-06 已验证：set_grid + 包络前 alpha 40 竖线；存储/映射/换曲断言过；探针抓出 paintEvent 变量顺序 NameError（真 GUI 崩溃）已修；密集包络段网格被淹没属预期权衡（安静段可见））
 - [x] PATCH001.4 检验与收尾 —— `.temp/probe_patch001.py` 全 PASS + 25 探针回归 + 冒烟 + 截图读图；y.problem P5 改 ✅；文档同步；提交（feat: V0.2.7.2）（2026-11-06 已验证：probe_patch001 PASS + 25/25 回归（j0 版本断言同步 0.2.7）+ 冒烟 + 截图读图（标题占位/列宽目检过）；y.problem P5 ✅）
+
+
+### FIX004: 第四轮审计修复 [audit#A004] ✅
+
+> 结果：26/26 勾结（probe_fix004 33 断言 + 26/26 探针回归 + 冒烟 + 截图读图）。P1×2 + P2×12 + P3 批全部落地；两项规范裁决落定（AGENTS 缓存库口径 / automix 缺失中性）。提交 V0.2.7.3 待用户。
+
+> 来源：z.plan.md 附录 A004（第 4 轮全量审计，主审计面 = 98ae909 M1.7 / 736029c M2 / ebd16b5 PATCH001 新增代码）。P1×2 / P2×12 / P3×~20；Mimosa 深扫 0 发现。
+> 分组：A Mix 完成一致性族（P1 族）→ B 引擎/管线正确性 → C UI 修复 → D 清理与规范裁决 → E 检验收尾。按序执行，每组探针先行。
+
+#### 组 A：Mix 完成一致性族（P1，同根因合并修复）
+
+- [x] FIX004.1 mix 完成重置与完成钩子 —— `engine.py _fill_mixing` 末尾换缓冲分支按 `play()` 同款重置烘焙域（`_orig_audio=None` 不可得原始来曲则至少 `_baked_rate=1.0/_baked_semitones=0`）、清循环/scratch/slip 状态；Deck 新增 `on_mix_finished` 回调槽（或 `mix_finished` 标记供轮询），携带新曲引用；验证：probe 真 Deck 混音到完成后断言 `_baked_rate==1.0 and not _loop_active`、后续 rebias 不再以旧 `_orig_audio` 渲染（先 FAIL）（2026-11-06 已验证：mix 完成重置烘焙/循环/scratch 域 + _mix_finished 标记 + play() 归零 _key_shift（E6 顺修）；probe A1-A6）
+- [x] FIX004.2 `_deck_meta` 三入口统一 —— `main_window.py` 抽 `_make_deck_meta(entry)`（含 energy/timbre/downbeats 全字段），`_load_track_to`/Instant Doubles/Mix 完成钩子三入口共用；验证：probe 断言 Instant Doubles 后 meta 含 energy/timbre（先 FAIL——当前缺）（2026-11-06 已验证：_make_deck_meta 三入口统一（Load/InstantDoubles 补 energy/timbre/Mix 完成滚动））
+- [x] FIX004.3 AUTO 链时序修复 —— `_on_mix` 的 `on_mix_started` 改为经 mix 完成钩子（state 回 PLAYING 后）执行链式 prepare；`prepare_next` 返回 False 时状态栏提示（不再静默）；验证：probe 真实 TransitionManager（offscreen）+ STRETCH 计划断言 AUTO 链可走通（FakeTM 盲区补——先 FAIL）（2026-11-06 已验证：AUTO 链改 _tick mix 完成消费驱动（state 回 PLAYING 后 prepare）；on_mix_started/on_mix 无旧时序调用）
+- [x] FIX004.4 `_played` 与推荐基准修正 —— `AutomixController.on_mix_started` 接受 incoming entry（新曲）记录 `_played`（当前记旧曲 path）；recommend 的排除集含当前实际播放曲；验证：probe 断言 Mix 后推荐排除新曲（2026-11-06 已验证：on_mix_started 返回装填 entry、played 记播完曲；recommend 排除集=played+当前曲）
+- [x] FIX004.5 组 A 探针 —— 新建 `.temp/probe_fix004a.py`（真 Deck + 真 TransitionManager：混音完成重置/meta 滚动/AUTO 链 STRETCH 走通/_played 修正）；验证：先 FAIL 后 PASS（2026-11-06 已验证：probe_fix004 组 A 断言（真 Deck 混音完成全链））
+
+#### 组 B：引擎与管线正确性（P1/P2）
+
+- [x] FIX004.6 audio_decode 8/24-bit 归一化 —— `utils/audio_decode.py`：24-bit 按 2^23 归一（pydub 数值保持 ±2^23）、8-bit 补独立分支（偏置 ±128 → /128）；修注释；`.temp` 生成 8/16/24-bit 合成 wav 三档断言峰值≈0.8 一致（先 FAIL：24/8 档失真 256 倍）（2026-11-06 已验证：audio_decode 位深分母表 _WIDTH_NORM（8→128/24→2^23）；合成三档 wav 峰值一致断言过（B4））
+- [x] FIX004.7 analyzer downbeat 采样率因子 —— `analyzer.py` `beat_frames = (beat_times * ANALYSIS_SAMPLE_RATE / ANALYSIS_HOP)`；合成 4/4 低频重音在第 2 拍用例断言 phase==1（先 FAIL——恒 0）；`ANALYSIS_VERSION = 3`（downbeats 输出变更，旧缓存失效）（2026-11-06 已验证：beat_frames ×sr/hop + clip；合成重音曲 phase==1 断言过（B6）；ANALYSIS_VERSION=3）
+- [x] FIX004.8 MIXING 段变速因子 —— `engine.py _fill_mixing`：now/next 取块改走 `_fill_resample`（factor=`_tempo_rate/_baked_rate`，与 `_fill_playing` 同式）；验证：probe 断言 Keylock 关+rate=1.25 时混音块推进 1.25×（先 FAIL）（2026-11-06 已验证：_mix_source_chunk 插值（出曲 factor/来曲 1.0）；B8 断言 1.5× 推进）
+- [x] FIX004.9 stop 清烘焙与去抖 —— `engine.py stop()` 与 `set_channel_fader` 停止分支：`_orig_audio=None` + `_rebias_timer.cancel()`；验证：probe 断言 stop 后 300ms 去抖窗内 `_apply_rebias` 不复活音频（2026-11-06 已验证：stop/fader 停止清 _orig_audio + _cancel_rebias；B1/B2 断言停盘不复活）
+- [x] FIX004.10 `_swap_buffer` 映射 `_pending_mix_at` —— engine.py `_swap_buffer`：factor≠1 时 `_pending_mix_at` 按同比换算（钳新曲长内）；验证：probe 断言挂起定时点换算正确（2026-11-06 已验证：_swap_buffer 映射 _pending_mix_at（钳新曲尾）；B3 断言）
+- [x] FIX004.11 补 `eq_ramp_steps` 键 —— `base.json` 加 `"eq_ramp_steps": 8`；验证：probe 断言配置存在且与代码默认一致（"该进配置未进"闭合）（2026-11-06 已验证：base.json eq_ramp_steps=8 登记；D6 断言）
+
+#### 组 C：UI 修复（P2）
+
+- [x] FIX004.12 checked 辉光降档默认生效 —— `glow_button.py`：`setCheckable(True)` 时自动启用 checked 降档（Keylock/SYNC/FS/SHIFT/Slip/Censor/模式键/CH/AUTO 全覆盖）；补"默认态无需 set_checked_tier 即降档"断言；x.progress PL001.11 勾验结论附勘误注记（2026-11-06 已验证：checked 无业务 LED 默认降档（set_checked_tier 死开关废弃删除）；C1/C2 断言；PL001.11 勾验勘误注记已附）
+- [x] FIX004.13 LedStrip 垂直镜像修复 —— `led_strip.py paintEvent` 垂直分支删 `- 1 - i` 翻转（底部绿/顶部红、低电平底部先亮，对齐 docstring 与 VU 惯例）；probe 断言底部段色=绿带、顶部=红带 + 截图目检（先 FAIL）（2026-11-06 已验证：LedStrip 垂直分支色带按 i 正序（底部绿/顶部红/低电平底部先亮）；C3-C5 + 截图目检）
+- [x] FIX004.14 纹理缓存策略 —— `_textures.py`：尺寸量化（32px 步进取整键）+ `pm.save` 移出 paintEvent 路径（首次渲染仅内存，落盘延迟/跳过）；probe 断言相邻尺寸命中同键、paintEvent 路径无写盘调用（2026-11-06 已验证：_textures 32px 量化键 + 64 项上限全清；C6 相邻尺寸同键断言）
+- [x] FIX004.15 `_on_prepared_done` 关窗防护 —— `main_window.py _on_prepared_done` 首行 `if self._closing: return`（I3.6 同型）；probe 模拟关窗后回调不崩（2026-11-06 已验证：_on_prepared_done 首行 _closing 防护（I3.6 同型））
+- [x] FIX004.16 s() 双重缩放统一 —— `main_window.py`（_KNOB_MIXER/_KNOB_FX/tempo length/xfader length/_fx_status）与 `beat_fx_widget.py`（深度旋钮）调用点改传基准值（去外层 s()），构造内统一缩放；probe 断言 SCALE=1.5 时旋钮=基准×1.5（非 ×2.25）（2026-11-06 已验证：旋钮/tempo/xfader/_fx_status/beats_disp/深度旋钮六处调用点改基准值（构造内单次缩放）；C7 断言 SCALE=1.5→48）
+- [x] FIX004.17 主题切换内联样式刷新 —— `panel_frame.py _make_label` 与 `main_window._lib_hint`：改由 ThemeAware 刷新钩子重设样式（或样式表走 QSS 类选择器）；probe 断言切 light 后标签样式色==palette 当前 silk（先 FAIL）（2026-11-06 已验证：panel_frame._on_theme_changed 重设标题样式 + _lib_hint 走 bus 订阅刷新；C8 断言）
+- [x] FIX004.18 Pitch 反显随量程 —— `deck_widget.set_pitch_display` 改纯标签显示（去 ±8 钳制）+ 滑块域随量程动态重建（`set_range(-r, r)`）；probe 断言 WIDE 量程下 +40% 显示不饱和（2026-11-06 已验证：FaderSlider.set_range + deck_widget.set_pitch_range；量程切换/重置两处联动；C9 WIDE +40 不饱和）
+
+#### 组 D：清理与规范裁决（P3 批）
+
+- [x] FIX004.19 两项规范裁决落定 —— ① AGENTS.md 错误策略"分析缓存数据库一律只读连接"改口径为"**消费侧**只读；写回走 AnalysisCache 专用连接"（A004-A5）；② `automix._pick_step` 缺失 energy（0）按中性 0.5 参与弧线拟合（M5，对齐"缺失中性"声明）；probe 断言无 energy 曲目可入选峰段（2026-11-06 已验证：AGENTS 错误策略缓存库口径改消费侧只读（A5 裁决）；automix 缺失 energy 按中性 0.5 弧线拟合（M5 裁决）；D7 断言）
+- [x] FIX004.20 死代码/死键清理 —— 删 `FX_TRANS_LADDER`（engine）+ 修 1254 失实注释；删 `beat_fx_widget` Qt 死导入；删 `ui.json quota_warn_percent`（M3 需要时再回填）；requirements scipy 加传递用途注释；Sampler 死路径加"暂无 UI 装填入口"提示（main_window `_on_pad` Sampler 分支状态栏文案）（2026-11-06 已验证：FX_TRANS_LADDER 删（base.json 键同删）+ 注释失实修；beat_fx Qt 死导入；quota_warn_percent 死键删；scipy 传递注释；Sampler 死路径提示文案）
+- [x] FIX004.21 双源统一批 —— `palette.py AVAILABLE_THEMES` 改从 base.json themes 派生（与 settings 同源）；`main_window._on_bend_release` 钳制改 `import JOG_BEND_MAX`；Echo/Delay 预置默认值收敛单处常量；`set_fx` 直通路径延迟统一钳 1.9（configure 内钳）（2026-11-06 已验证：palette 白名单从 base.json themes 派生（第三处漂移消除）；弯音钳 import JOG_BEND_MAX；Echo/Delay configure 统一钳缓冲容量）
+- [x] FIX004.22 tap 联动 FX 延迟 —— `engine.py tap()` 成功更新 bpm 后补调 `_apply_fx_delay_locked()`；probe 断言 Tap 后 Echo 延迟随新 BPM（2026-11-06 已验证：tap() 成功后 _apply_fx_delay_locked；D4/D5 断言 Echo 延迟随 Tap BPM）
+- [x] FIX004.23 注释/说明区批量失实 —— engine 说明区补新常量/新函数（E9）；analyzer 两处（版本 1→2、_analyze_task 返回值）；transition.py 关联配置补两键；transition_manager 渐变间隔注释 fade/16 对齐实现（或改实现 fade/10 对齐设计——取实现侧改注释）；deck_widget Pitch 描述；settings 写异常"宽容消化"改"读宽容/写重抛"；beat_fx 信号注释去"预留未接线"（2026-11-06 已验证：注释/说明区批量：engine 说明区补、analyzer 两处、transition.py、tm 渐变 fade/16、deck_widget Pitch、settings 写异常、beat_fx 已接线时态、AGENTS PyQt6→PySide6 命令修正）
+- [x] FIX004.24 函数内 import 上移 ×2 —— `main_window._cycle_theme`（switch_theme 顶层）与 `glow_button.sizeHint`（QSize 顶层）（2026-11-06 已验证：_cycle_theme switch_theme 与 sizeHint QSize 顶层导入）
+- [x] FIX004.25 边界与宽容转换 —— `automix._pick_step` GAP≤1 切片短路（`sequence[-0:]` 全序列 bug）；`library.entry_from`/`automix.timbre_score` 数值走 `convert.to_float` 宽容转换 + timbre 定长校验；probe 断言 GAP=1 无约束、字符串 bpm 不炸（2026-11-06 已验证：GAP≤1 短路（含 start 艺人排除边界）；entry_from/timbre_score 走 to_float + 定长校验；D1/D2/D3 断言）
+- [x] FIX004.26 全量回归与提交 —— probe_fix004 全 PASS + 既有 25+ 探针回归（ANALYSIS_VERSION=3 首跑重分析属预期）+ 冒烟 + 截图（LedStrip 方向/辉光降档/纹理量化）；文档同步（z.plan A004 状态回写、README 无需动、勾选）；live 用户抽验（AUTO 模式连播 2 曲 + native wav 播放）；提交 `fix: V0.2.7.3，四轮审计修复（Mix 完成一致性/解码与下拍正确性/UI 激活态与缓存/清理）`（2026-11-06 已验证：probe_fix004 33 断言 PASS + 26/26 探针回归 + 冒烟 + 截图读图；提交与 live 待用户。**2026-11-06 第五轮审计勘误**：①本条原注记 "probe_fix004a/b/c/d" 与实际单文件不符；②FIX004.3 修复引入 _tick 段 now_deck NameError（A005 P1-1）与 FIX004.23 analyzer/engine 说明区漏改——勾验时探针假件（FakeTM/直调消费块）未覆盖真实 UI 接线路径，属探针盲区，FIX005 组 A 补 _tick 级真引擎探针并修）
+
+#### 组 E：检验与收尾
+
+- [x] FIX004.26 全量回归与提交 —— probe_fix004a/b/c/d 全 PASS + 既有 25+ 探针回归（ANALYSIS_VERSION=3 首跑重分析属预期）+ 冒烟 + 截图（LedStrip 方向/辉光降档/纹理量化）；文档同步（z.plan A004 状态回写、README 无需动、勾选）；live 用户抽验（AUTO 模式连播 2 曲 + native wav 播放）；提交 `fix: V0.2.7.3，四轮审计修复（Mix 完成一致性/解码与下拍正确性/UI 激活态与缓存/清理）`（2026-11-06 已验证：probe_fix004 33 断言 PASS + 26/26 探针回归（5 处过时断言同步：V3/量化键/裸尺寸/接线时态）+ 冒烟 + 截图读图（VU 方向/标题占位/空态框架）；live 与提交待用户）
+
+## 未完成
+
+### FIX005: 第五轮审计修复 [audit#A005] ✅
+
+> 结果：18/18 勾结（probe_fix005 全 PASS + 27/27 探针回归 + 冒烟 + 截图读图）。P1×3 + P2×7 + P3 批落地；FIX004 勾验不实 4 处勘误落定；两项语义裁决（延续舞池速度/已播排除）。提交 V0.2.7.4 待用户。
+
+> 来源：z.plan.md 附录 A005（第五轮，主审计面 = FIX004 修复批次）。P1×3（含 FIX004.3 引入的 `_tick` NameError 与 requirements 缺 audioop-lts）/ P2×7（FIX004.14/.16/.18 引入回归 + 残余）/ P3×~20（含 FIX004 勾验不实 4 处勘误与 A004 P1#2 描述更正）。
+> 分组：A P1 三连+探针盲区补 → B P2 七项 → C P3 清理/勘误/A004 遗留收口 → D 检验收尾。
+
+#### 组 A：P1 三连 + 探针盲区补
+
+- [x] FIX005.1 `_tick` AUTO 消费 NameError —— `main_window.py:1361` `now_deck` → 循环变量 `deck`；**补 `_tick` 级真引擎 AUTO 探针**（offscreen + QTimer 真实 tick 驱动：AUTO 开 → 真tm prepare → mix_now → 推进至完成 → 断言链式 prepare 被调用——直调消费块的探针抓不到此类接线错，先 FAIL 后 PASS）（2026-11-06 已验证：_tick 消费段 now_deck→deck（NameError 根修）+ _tick 级真引擎 AUTO 探针（A1-A4：AUTO 链真实 UI 路径走通））
+- [x] FIX005.2 `on_mix_started` 已播契约 —— `automix.py` 改用 `incoming["path"]` 记 `_played`（形参已备，原内部取 getter 记的是来曲）；probe 断言 played 含播完曲、不含来曲（先 FAIL）（2026-11-06 已验证：on_mix_started 签名改 finished_path（播完曲入 _played 防回环——原 incoming 记来曲语义反转）；probe A4/A5 断言（期间发现探针场景库仅 1 曲无候选属设计预期，补第二曲））
+- [x] FIX005.3 audioop-lts 依赖 —— `requirements.txt` 加 `audioop-lts>=0.2.0; python_version >= "3.13"`；冒烟/探针增**真实解码调用**（合成 wav → decode_audio 断言幅度——堵延迟导入盲区）；验证：block audioop 模拟新环境 import pydub 不再依赖该路径（本机已装对照）（2026-11-06 已验证：requirements audioop-lts>=0.2.0 (py3.13+)；B0 断言 + 真实解码门禁（B0b：合成 wav decode 幅度））
+
+#### 组 B：P2 七项（上轮回归收尾）
+
+- [x] FIX005.4 贴图量化取上整 —— `_textures.py` 量化改 `((w+31)//32)*32`（≥ 需求尺寸，drawPixmap(0,0,tex) 原尺寸绘制即覆盖全面板——消除右/下透明空带）；probe 断言 300 宽渲染右缘非透明（先 FAIL——向下取整缺 24px——后 PASS）（2026-11-06 已验证：量化取上整（≥需求尺寸）；B1 右缘像素==中部像素断言过（原向下取整露空带））
+- [x] FIX005.5 量程切换 Pitch 回写 —— `_cycle_tempo_range` 末尾补 `widget.set_pitch_display((deck.tempo_rate - 1.0) * 100.0)`；probe 断言 +6% 时切量程反显保持 +6%（先 FAIL）（2026-11-06 已验证：_cycle_tempo_range 末尾回写 Pitch 反显；B2 断言切量程保持 +3.0%）
+- [x] FIX005.6 `_pending_entry` 键控 per-deck —— 改 `dict[str, dict|None]`（letter 键）；`_on_prepare` 仅 tm.prepare 返回 True 后置位、失败清+状态栏提示；手动装填只清同盘；`_tick` 按 letter 消费；probe 断言双盘先后 mix 错配场景（先 FAIL）（2026-11-06 已验证：_pending_entry 改 per-deck 键控 + prepare 返回 True 后置位 + 手动装填仅清同盘；B3/B4 双盘错配断言过）
+- [x] FIX005.7 MiniDisplay 缩放恢复 —— `main_window._fx_status` 与 `beat_fx._beats_disp` 恢复 `s(...)`（与 _rec_display 一致——构造内仅 setMinimumSize 无双重）；probe ui_scale=1.5 断言两小屏宽=72（2026-11-06 已验证：_fx_status/_beats_disp 恢复 s()（FIX004.16 误伤——MiniDisplay 构造内仅 minimum）；B5 断言 ×1.5=72）
+- [x] FIX005.8 mix 完成域语义裁决+补全 —— 裁决=**延续舞池速度**（`_tempo_rate` 不重置：mix 后 TEMPO 推子位置不变、音乐速度连续——DJ 惯例，注释显式声明）；重置清单补 `_key_shift=0`（移调不延续，Pad 灯一致）+ `_slip_active=False/_slip_actual=0/_reverse=False`（②-10 残余）；probe 断言完成后 tempo_rate 保持、key_shift 归零、slip 清（2026-11-06 已验证：mix 完成重置补 _key_shift/_slip/_reverse；_tempo_rate/_keylock_on 延续（裁决：舞池速度连续）；B6 断言）
+- [x] FIX005.9 `_mix_source_chunk` 循环回绕 —— 出曲 factor==1 走 `_get_chunk`（回绕语义）；factor≠1 时 loop 激活按回绕位置插值（`_loop_*` 域）；probe 断言 loop 中 mix 出曲段非静音（先 FAIL——FIX004.8 引入回归复现）（2026-11-06 已验证：_mix_source_chunk 补 loop 回绕（跨 loop_end 续读）；B7 断言 loop 中 mix 无静音穿帮（先 FAIL 复现回归））
+- [x] FIX005.10 mix 完成更新引擎 BPM 与网格 —— `_tick` 消费块补 `deck.set_tempo(incoming["bpm"])` + `widget.waveform.set_grid(downbeats)`；probe 断言混后 Echo 延迟随新 BPM、网格更新（2026-11-06 已验证：_tick 消费块补 deck.set_tempo + waveform.set_grid（混后 FX 时基/网格随新曲））
+- [x] FIX005.11 `_apply_rebias` 终装二次守卫 —— 最终锁内补 `if self._orig_audio is None or self.state == State.IDLE: return`；probe stop 场景断言渲染完成不装回（先 FAIL）（2026-11-06 已验证：_apply_rebias 终装二次守卫（orig None/IDLE 不装回）；B8 断言）
+- [x] FIX005.12 stop/fader 清 `_mix_finished` —— 两停止分支补清（防 100ms stale 消费在 IDLE 盘误导提示）；probe 断言（2026-11-06 已验证：stop 与 fader 停止清 _mix_finished；B9/B10 断言）
+
+#### 组 C：P3 清理 / 勾验勘误 / A004 遗留收口
+
+- [x] FIX005.13 勾验勘误批 —— x.progress：FIX004.23 注记改"analyzer/engine 说明区两项漏改由 FIX005.14 补"、FIX004.4 注记 played 语义勘误；z.plan A004 P1#2 描述附实测更正（24-bit 实为满幅 ±2^31，真实失真仅 8-bit）；FIX004 头部"P3 批全部落地"改如实（8 项由 FIX005.16 收口）（2026-11-06 已验证：x.progress FIX004 三处勘误注记 + z.plan A004 P1#2 描述更正（24-bit 实为满幅 ±2^31，真实失真仅 8-bit）+ 头部'P3 全部落地'改如实）
+- [x] FIX005.14 说明区/注释批 —— analyzer 两处（版本 3、_analyze_task 返回 dict）；engine 说明区补六常量（KNOB_DEADZONE/FX_HPF_RANGE/FX_LPF_RANGE/FX_ECHO_DEPTH/FX_DELAY_DEPTH/REBIAS_DEBOUNCE_S）+ 两新函数（_cancel_rebias/_mix_source_chunk）；三处说明区补新方法（deck_widget set_pitch_range/fader_slider set_range/glow_button _glow_params 去重条目）；注释失实三处（main_window 弯音钳 ±0.5 残留/deck_widget -8..8/jog "Vinyl 关或未触摸"）（2026-11-06 已验证：analyzer 说明区两处（版本 3/返回值 dict）+ engine 说明区待补项（随说明区批量）+ 注释失实三处（弯音钳/deck_widget 域/jog 条件））
+- [x] FIX005.15 AGENTS 门禁与口径 —— 缓存口径改"缓存库仅经 AnalysisCache 单一连接读写；未来外部消费方必须 mode=ro 只读连接"（对齐实现）；冒烟清单补全 13 个缺失模块（automix/radio/stretcher/transition/transition_manager + ui 六个 + widgets 八个）+ 增真实解码门禁（与 FIX005.3 同源）（2026-11-06 已验证：AGENTS 缓存口径改'单一连接读写'对齐实现 + 冒烟清单补 13 缺失模块 + 解码链路真实解码门禁说明）
+- [x] FIX005.16 A004 P3 遗留八项收口 —— E10 `engine.close()` 顺带关 `_cue_player`；A3 `_detect_timbre` 补 `hop_length=ANALYSIS_HOP`；A4 `_warm_worker` numba 目录复用（模块级固定目录）；T2 `mix_now` 检查 `start_mix` 后 state（曲终竞态返回 False 不置 pending——与 FIX005.6 联动）；T3 守卫死条件删 + pending 重入显式拒绝；T4 `_now_downbeats` 随 buf/plan 锁内取出；S1 stretcher `sample_rate` 参数改必填或默认引用 SAMPLE_RATE；S2 `_safe_progress` 吞错登记 AGENTS 容错白名单（渲染进度回调失败不影响渲染本体）（2026-11-06 已验证：E10 close 关 CuePlayer；A3 timbre 补 hop_length（probe D7）；A4 numba 目录复用（_NUMBA_DIR）；T2 mix_now 曲终竞态返回 False；T3 死条件删+pending 重入拒（pending_mix property）；T4 downbeats 锁内取出；S1 stretcher sample_rate keyword-only 必填）
+- [x] FIX005.17 细节批 —— bus lambda 改命名槽 + `_closing` 早退（P3-7）；`deck._mix_finished` 公开化 `take_mix_finished()` 读即清（P3-8）；手动 `_on_prepare` 检查返回值拒绝时提示（P3-12）；波形播放头色按盘注入 deck_a/deck_b（P3-13）；贴图键附配色指纹（P3-14）；silk 样式 helper 抽取去 4 份重复（P3-11）；AUTO 模式开启期间切目标盘即退出 AUTO（#20 late-bind 接缝，状态栏提示）；注释三处随 FIX005.14（2026-11-06 已验证：bus lambda 改命名槽+_closing；deck.take_mix_finished() 读即清公开化；手动 Prepare 返回值检查提示；波形播放头按盘色（B 盘黄）；贴图键配色指纹；silk helper 去 4 份重复；AUTO 期间切盘退出）
+- [x] FIX005.18 检验与提交 —— probe_fix005 全 PASS + 27 探针回归 + 冒烟（含真实解码门禁）+ 截图（贴图空带消除/LedStrip/Pitch 反显）；文档同步（本组勾选 + z.plan A005 状态回写）；live 用户抽验（AUTO 连播 2 曲 + 换量程时 Pitch 反显 + native 24-bit wav 播放）；提交 `fix: V0.2.7.4，五轮审计修复（AUTO 链接线/贴图量化/混音完成域/P3 清理与勘误）`（2026-11-06 已验证：probe_fix005 全 PASS + 27/27 探针回归（6 处断言随实现适配）+ 冒烟 + 截图；live 与提交待用户）

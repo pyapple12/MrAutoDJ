@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from ui import palette
@@ -30,12 +30,12 @@ _FX_KNOB_SIZE = int(_UI.get("knob_size_fx", 28))  # J0.3：FX 区旋钮分级基
 class BeatFxWidget(QWidget):
     # Beat FX 面板：选择/通道/拍数/深度/开关（全部原语控件）
     fx_changed = Signal(str)  # 效果类型
-    channel_changed = Signal(str)  # "1" | "2" | "both"（预留未接线，I3.2/M1.7 批次 1 启用）
-    beats_changed = Signal(int)  # 拍数（预留未接线，I3.2/M1.7 批次 1 启用）
+    channel_changed = Signal(str)  # "1" | "2" | "both"（M1.7 已接线）
+    beats_changed = Signal(int)  # 拍数（M1.7 已接线）
     depth_changed = Signal(float)  # 0-1
     onoff_changed = Signal(bool)
-    bpm_tap = Signal()  # TAP 按钮（预留未接线，I3.2/M1.7 批次 1 启用）
-    bpm_auto = Signal()  # AUTO 按钮（预留未接线，I3.2/M1.7 批次 1 启用）
+    bpm_tap = Signal()  # TAP 按钮（M1.7 已接线）
+    bpm_auto = Signal()  # AUTO 按钮（M1.7 已接线）
 
     def __init__(self, parent=None):
         # 初始化：效果按钮组 + 通道开关 + 拍数 ± + 深度旋钮 + 开关 + BPM 模式
@@ -77,14 +77,14 @@ class BeatFxWidget(QWidget):
 
         # 拍数：MiniDisplay + ±按钮（±有本地可见反馈保留可用；引擎接线 J1.1）
         self._beats_disp = MiniDisplay()
-        self._beats_disp.setFixedSize(s(48), s(20))  # J4 缩放
+        self._beats_disp.setFixedSize(s(48), s(20))  # FIX005.7：恢复缩放（构造内仅 minimum）
         self._beats_minus = GlowButton("-")
         self._beats_plus = GlowButton("+")
         self._beats_minus.clicked.connect(self._beats_delta)
         self._beats_plus.clicked.connect(self._beats_delta)
 
         # 深度旋钮（J0.7：数值 Tooltip）
-        self._depth = RotaryKnob(0.0, 1.0, default=0.0, size=s(_FX_KNOB_SIZE))  # J4
+        self._depth = RotaryKnob(0.0, 1.0, default=0.0, size=_FX_KNOB_SIZE)  # FIX004.16 基准
         self._depth.setToolTip("深度 0%")
         self._depth.valueChanged.connect(
             lambda v: self._depth.setToolTip(f"深度 {v * 100:.0f}%")
@@ -193,8 +193,8 @@ class BeatFxWidget(QWidget):
 #   BeatFxWidget(QWidget)：Beat FX 面板
 # 信号：
 #   fx_changed / depth_changed / onoff_changed：已接线（MainWindow 接引擎）
-#   channel_changed / beats_changed / bpm_tap / bpm_auto：预留未接线
-#     （I3.2 标注：对应 CH/AUTO/TAP 为用户可见预留控件，M1.7 批次 1 启用）
+#   channel_changed / beats_changed / bpm_tap / bpm_auto：M1.7 起全部接线
+#     （CH→FX 通道、beats→拍数、AUTO/TAP→FX 时基；I3.2 时的"预留"状态已解除）
 # 方法：
 #   _select_fx(fx)：效果互斥（LED 橙色；构造末尾即调一次——初始选中键橙光
 #     与点击后一致，PL001.10）

@@ -87,5 +87,6 @@ def plan_transition(
 # 设计理由：纯函数无副作用（可单测）；漂移模型避免"半速/双速"误判
 #   （64BPM 曲拉伸到 128 的经典 bug，用 r_eff 而非原始比值）
 # 异常处理：无（拍速≤0 视为 skip 混音，不抛错）
-# 关联配置：无（stretcher.py/engine.py 复用）
+# 关联配置：config/static/base.json（max_drift_beats/tempo_match_tolerance，
+#   I3.4 补录——原"关联配置：无"失实）
 

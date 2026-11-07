@@ -71,12 +71,14 @@ class LedStrip(ThemeAware, QWidget):
             seg_h = (h - gap * (self._segments - 1)) / self._segments
             for i in range(self._segments):
                 y = h - gap - (i + 1) * seg_h - i * gap
-                color = self._segment_color(self._segments - 1 - i, lit)
+                # FIX004.13：i=0 即底部段（y 公式决定），色带按 i 正序（底部绿/
+                # 顶部红、低电平底部先亮——原 -1-i 翻转致方向/色带整体镜像）
+                color = self._segment_color(i, lit)
                 p.setBrush(color)
                 p.setPen(Qt.NoPen)
                 p.drawRoundedRect(QRectF(1.0, y, w - 2.0, seg_h - 1), 1, 1)
                 # PL001.8：未亮段顶部 1px 6% 白描边（框架可见）
-                if self._segments - 1 - i >= lit:
+                if i >= lit:
                     p.setPen(QPen(QColor(255, 255, 255, 15), 1))
                     p.drawLine(QPointF(2.0, y + 1.0), QPointF(w - 2.0, y + 1.0))
         else:

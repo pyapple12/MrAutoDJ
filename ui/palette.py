@@ -12,8 +12,9 @@ from config.static.static_config import get_static_config
 _SC = get_static_config()
 _UI = _SC.ui
 
-# 主题注册表（J2）：dark = ui.json 全量 token；light = ui.json + theme_light 覆盖
-AVAILABLE_THEMES = ("dark", "light")
+# 主题注册表（J2）：dark = ui.json 全量 token；light = ui.json + theme_light 覆盖；
+# FIX004/N4：白名单从 base.json themes 派生（与 settings 同源，消除第三处漂移）
+AVAILABLE_THEMES = tuple(_SC.base.get("themes", ["dark", "light"])) or ("dark",)
 
 
 class _ThemeBus(QObject):
@@ -55,6 +56,13 @@ def color(key: str, default: str) -> QColor:
     if key in sub:
         return QColor(str(sub[key]))
     return QColor(str(_tokens.get(key, default)))
+
+
+def silk_label_style(extra: str = "") -> str:
+    # 丝印标签内联样式（FIX005/P3-11：原 4 份重复样式串统一——lib_hint 构造/
+    # 刷新、panel_frame 两处；extra 附加如 "font-size: 12px; "）
+    silk = color("silk_text", "#8a9099")
+    return f"color: {silk.name(QColor.HexRgb)}; {extra} background: transparent;"
 
 
 def set_theme(name: str) -> bool:

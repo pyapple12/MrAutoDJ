@@ -780,3 +780,107 @@ H 系列 19 项修复在位（除 H0.1 漏改）；配置键 40 个与读取方�
 - 不动引擎/modules 层；不改配色 token 值本身（light/dark token 表不动，只改透明度分档）；不改交互逻辑与信号（A4 显示文本与业务值分离）；Splitter 响应式重排、Tooltip 体系等 M1.7 批次 0 已做项不重做
 - 评审报告中"波形无拍标线（BPM grid）"等属 M2 对拍功能范畴，不入本 PATCH（记录到 y.problem 备忘，未来 [problems#N]）
 
+
+---
+
+## 附录 A004：全量代码审计报告（第四轮，2026-11-06）
+
+> 范围：modules/ ui/ utils/ config/ main.py + 静态 JSON（三路并行只读：modules 核心组 / ui 组 / config+utils 组，逐文件全文阅读）；主审计面 = A003 之后的三个功能提交 **98ae909（M1.7）/ 736029c（M2）/ ebd16b5（PATCH001）**；Mimosa 独立深扫 0 发现（seal 892f…，静态面与人工审计互补）。
+> 方式：audit-project skill（MR 2026-11-05 版）执行；只读未改代码。
+> 状态：✅ **已修复**（2026-11-06，FIX004 26/26 勾结，见 x.progress.md；probe_fix004 33 断言 + 26/26 探针回归 + 冒烟 + 截图读图。P1 两族（Mix 完成一致性/解码位深）+ P2 全部 12 项 + P3 批清（含两项规范裁决落定：A5 缓存库口径改消费侧只读、M5 缺失 energy 中性拟合）。ANALYSIS_VERSION→3 旧缓存自动失效。提交 V0.2.7.3 由用户执行）
+
+### 零、上轮修复复核清单
+
+| 结果 | 项 |
+| --- | --- |
+| ✅ 在位 | I 系列 20 项全部在位（三路代理 `git show 19ef44d` 逐文件比对 + probe_i0-i3 行为断言双重确认）；H 系列抽查、PATCH001 三件在位；98ae909 新代码正确继承修复模式（factor 分支钳制 / HPF/LPF 未回退重建 Biquad） |
+| 结论 | 三组一致无漏改无回归；但发现 2 处**方案落地缺口**（PL001.11 辉光降档死开关 → 一节 #8；PL002.11 AUTO 链真实引擎失效 → 一节 #1）——属新代码集成缺陷而非修复丢失 |
+
+### 一、P0-P3 修复清单（合并去重：P1×2 / P2×12 / P3×~20）
+
+#### P1（必修——确定性错值/数据破坏）
+
+| # | 文件:行号 | 描述 | 建议 | 性质 | 影响面 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | **Mix 完成状态一致性族**（engine.py:1114-1119 + main_window.py:1014-1023/820-825 + automix.py:305-314） | ① `_fill_mixing` 换缓冲不重置烘焙域/循环/scratch——Keylock 下来曲按旧曲速度播、rebias 以旧 `_orig_audio` 渲染把上一曲换回、旧循环套新曲；② `_deck_meta` Mix 后从不更新→第二次转场起 BPM/downbeats/推荐基准全错位；③ AUTO 链在 mix_now 置 MIXING 之后才 prepare→PLAYING 守卫恒拒且静默——AUTO 真实引擎下永不自动装填（probe FakeTM 无守卫=勾验盲区）；④ Instant Doubles meta 缺 energy/timbre | mix 完成钩子统一：play() 同款重置 + `_make_deck_meta(entry)` 三入口共用 + 链式 prepare 等回 PLAYING + 失败上状态栏；补真实守卫探针 | 新增（M1.7/M2） | 转场编排/主窗口/跨模块 |
+| 2 | utils/audio_decode.py:16-21 | 8/24-bit WAV 归一化失真 256 倍（pydub 源码核实：24-bit 数值 ±2^23 却除 2^31；8-bit 偏置后仍除 32768）→ native wav 播放/VU/波形/能量分析近静音级失真，静默 | 按位深正确归一（24→2^23、8 补分支）+ 合成三档 wav 探针 + 修注释 | 遗留（G1.1 起） | 解码管线全链路 |
+
+#### P2（应修）
+
+| # | 文件:行号 | 描述 | 性质 |
+| --- | --- | --- | --- |
+| 3 | analyzer.py:555 | downbeat 帧换算 `beat_times / ANALYSIS_HOP` 缺采样率因子（应 ×sr/hop）→ 相位探测自 V0.1 从未生效（恒 phase 0，每曲白算全曲 STFT） | 遗留 |
+| 4 | engine.py:1098-1119 | MIXING 段无变速因子：Keylock 关+TEMPO≠1 时混音瞬间速度跳变、弯音/搜索失效 | 新增 |
+| 5 | engine.py:448-458/1352-1361 | stop()/fader 停止不清 `_orig_audio` 不取消 `_rebias_timer`→去抖窗后复活已停盘；整曲内存双份滞留 | 新增 |
+| 6 | engine.py:633-649 | `_swap_buffer` 漏映射 `_pending_mix_at`→定时切歌错位或静默丢失 | 新增 |
+| 7 | transition_manager.py:32 + base.json | `eq_ramp_steps` 读取方在、配置键从未登记（"该进配置未进"） | 新增 |
+| 8 | ui/glow_button.py:29/42-45 | checked 辉光降档死开关——`set_checked_tier` 生产零调用，PL001.11 勾验与实际行为不符（探针自证盲区） | 新增 |
+| 9 | ui/led_strip.py:74 | 垂直灯柱方向/色带整体镜像（顶部绿底部红、低电平顶部先亮，与 docstring/VU 惯例相反）；水平分支正确 | 遗留（M1.6 起） |
+| 10 | ui/widgets/_textures.py:46-66 | 纹理缓存无上限 + paintEvent 路径同步写 PNG（splitter 拖动逐像素 miss→卡顿+千级文件） | 新增 |
+| 11 | ui/main_window.py:1006-1012 | `_on_prepared_done` 无 `_closing` 防护（渲染窗关窗后 emit 已删对象，I3.6 同型漏改） | 新增 |
+| 12 | main_window.py:61-62/349/448 + beat_fx:87 | s() 双重缩放（调用点已 s() 构造内再 s()）——ui_scale≠1 时指数偏差 | 新增 |
+| 13 | panel_frame.py:33-41 + main_window:216-219 | 主题切换后丝印标题/空库引导句内联样式不刷新（浅底残留深色） | 新增 |
+| 14 | main_window.py:872/933 + deck_widget:157 | Pitch 反显 ±8 钳制 vs TEMPO 量程 ±16/WIDE——指示饱和失真 | 新增 |
+
+#### P3（摘要，~20 项）
+
+E5 FX_TRANS_LADDER 死常量+注释失实｜E6 play() 不重置 _key_shift（Pad 灯失真）｜E7 tap() 不联动 FX 延迟｜E8 Echo/Delay 默认值三处重复+1.9 钳制分叉｜E9 engine 说明区缺漏｜E10 close() 不关 CuePlayer｜A2 analyzer 说明区两处失实｜A3 _detect_timbre 不传 hop_length｜A4 numba 临时目录堆积｜**A5 缓存库可写 vs AGENTS"只读连接"口径冲突（规范裁决→FIX004.19）**｜M3 GAP=1 切片边界（`sequence[-0:]` 全序列）｜M4 缓存数值不走宽容转换（两处）｜**M5 弧线对缺失 energy 惩罚与"缺失中性"声明不符（裁决→FIX004.19）**｜T2 mix_now 曲终竞态返回 True 无混音｜T3 守卫死条件+pending 重入未声明｜T4 _now_downbeats 锁外读｜T5 渐变间隔 fade/16 与设计 fade/10 不符｜S1 sample_rate 默认 44100 三处｜S2 _safe_progress 吞错未登记｜R1 transition.py 说明区失实｜ui：Sampler 死路径（sample_load 零入口）/弯音钳双源/函数内 import ×2/beat_fx Qt 死导入+注释停在"预留未接线"/主题白名单三处漂移（palette 硬编码第三处）/贴图缓存键无配色版本/ui.json quota_warn_percent 死键/settings 写异常说明失实/scipy 死依赖
+
+### 二、参考级观察项（~30 项，代表性）
+
+打分表/σ/弧线 0.3 为 PL002 设计定值；plan_set 预留零调用；set_tempo_rate 保护性钳制；Biquad 硬编码 2ch（项目契约）；回调内 numpy 分配（说明区已声明）；_maybe_rebias 锁外原子读（理论，需验证）；Censor 不遵守 loop（黑胶语义）；mix_now 不恢复原 EQ（设计选择）；**静音 timbre 可能 NaN 进缓存（需验证）**；README 徽章==base.json ✓；base.json 其余 50+ 键全对齐 ✓；ThemeBus 无泄漏 ✓；waveform set_grid 越界处理正确 ✓；兼容标记不随切盘刷新；峰值缓存不随 resize；SHIFT 焦点滞留（A003 已登记）；AGENTS.md GUI 无头验证命令误写 PyQt6（应 PySide6）
+
+### 三、亮点
+
+I 系列 20 项修复零回归；探针体系暴露一处方法论盲区并已转化为修复项（**FakeTM 假件绕过真实 State 守卫→PL002 勾验假阳性**，FIX004.3/.5 补真实守卫探针）；M2 纯逻辑层（评分/规划/解析）质量良好，问题集中在跨模块时序契约（mix 完成/prepare 守卫/线程回调）——恰是假件探针覆盖不到的接缝；配置键 50+ 核对仅 1 缺 1 死。
+
+---
+
+## 附录 A005：全量代码审计报告（第五轮，2026-11-06）
+
+> 范围：modules/ ui/ utils/ config/ main.py + AGENTS/requirements（三路并行只读）；审计对象 = **A004 修复批次（FIX004，工作区未提交改动，HEAD ebd16b5 之后）**。
+> 方式：audit-project skill 执行；只读未改代码。
+> 状态：✅ **已修复**（2026-11-06，FIX005 18/18 勾结，见 x.progress.md；probe_fix005 全 PASS + 27/27 探针回归 + 冒烟 + 截图。P1×3 + P2×7 + P3 批全部落地；两项 A004 记录勘误落定。提交 V0.2.7.4 由用户执行）
+
+### 零、上轮修复复核清单
+
+| 结果 | 项 |
+| --- | --- |
+| ✅ 在位 | FIX004 修复主体 12/12（diff 逐块防漏改）：mix 完成重置、_swap_buffer pending 映射、stop/_cancel_rebias、MIXING 因子（_mix_source_chunk）、tap 联动、configure 钳容量、FX_TRANS_LADDER 删、audio_decode 位深分母表（pydub 源码+五档实测复核）、downbeat ×sr/hop（V3）、automix GAP 短路/缺失中性/timbre 定长/to_float、eq_ramp_steps、键增删全仓零残留 |
+| ❌ **FIX004 勾验不实 4 处** | ① FIX004.3 引入 `_tick` AUTO 消费段 **NameError**（P1-1，探针假件盲区再现）② FIX004.23"analyzer 两处说明区"未落地 ③"engine 说明区补全"未落地 ④ 头部"P3 批全部落地"不实（A004 P3 有 8 项未立条目未改）；FIX004.26"probe_fix004a/b/c/d"与实际单文件不符 |
+
+### 一、P0-P3 修复清单（P1×3 / P2×7 / P3×~20）
+
+#### P1（必修）
+
+| # | 文件:行号 | 描述 | 建议 | 性质 | 影响面 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | ui/main_window.py:1361 | `_tick` AUTO 消费段引用 `now_deck`——该名仅存在于其他三个方法局部，`_tick` 内未定义 → AUTO 开启时每次 mix 完成**确定性 NameError**，链式装填永不执行、当次 tick 刷新中断（非 AUTO 不触发；被标记已清故不重复抛） | 改循环变量 `deck`；**补 `_tick` 级真引擎 AUTO 探针**（QTimer 驱动——直调消费块的探针抓不到接线错，A004"探针盲区在接缝"教训重现） | 新增（FIX004.3 引入） | 主窗口/AUTO 链 |
+| 2 | automix.py:312-321 + main_window.py:1354-1361 | `on_mix_started(incoming)` 形参收而不用，内部仍读 `_now_meta_getter()`——UI 已先滚 meta 为来曲 → `_played` 记入**来曲**而非播完曲（播完曲永不进防重复名单，A→B→A 回环可能）。修 P1-1 后立即确定性复现 | `on_mix_started` 改用 `incoming["path"]` 记已播（形参已备） | 新增（FIX004.3 引入，跨 ui+modules） | AUTO 防重复 |
+| 3 | requirements.txt | **缺 `audioop-lts`**：py3.13+ 移除标准库 audioop；pydub 0.25.1 回退 `import pyaudioop` 为 py2 绝对导入（py3 必然失败）→ 按 AGENTS 流程重建 venv 后 `import pydub` 硬崩、解码全链路死；**冒烟门禁盲区**（pydub 延迟导入，import 全过测不出） | 加 `audioop-lts>=0.2.0; python_version >= "3.13"`；冒烟增真实解码调用（合成 wav → decode_audio） | 新增（环境可复现性；本机 venv 已手工装不受影响） | 解码全链路 |
+
+#### P2（应修）
+
+| # | 文件:行号 | 描述 | 性质 |
+| --- | --- | --- | --- |
+| 4 | _textures.py:50-51 + panel_frame.py:83 | 量化**向下取整**且绘制不拉伸——面板宽高非 32 倍数（几乎恒真）右/下缘露透明空带（FIX004.14 注释"按需拉伸"无实现） | 新增（FIX004.14 引入回归） |
+| 5 | main_window.py:903-905 | 量程切换调 set_pitch_range 后**不回写 Pitch 反显**——乐速非零点量程键：帽跳中位、标签滞留旧值 | 新增（FIX004.18 引入） |
+| 6 | main_window.py:135/786/1014 | `_pending_entry` 单槽无盘归属：双盘先后 mix 错配滚动、另一盘装填误清在途、prepare 守卫拒后滞留（与 T2 竞态叠加） | 新增（FIX004.2 设计缺口） |
+| 7 | main_window.py:517 + beat_fx:80（对照 :525） | MiniDisplay 两处去 s() 为**误伤**（构造内仅 setMinimumSize，setFixedSize 本无双重）——ui_scale≠1 不缩放；第三处 _rec_display 仍 s() 同类三态 | 新增（FIX004.16 扩面误伤） |
+| 8 | automix.py on_mix_started + engine.py:1169-1178 | mix 完成重置清单缺 `_tempo_rate`/`_key_shift`——来曲继承出曲盘乐速偏移与移调（×1.06/+2 半音）；"按 play() 同款重置"未完全兑现（需裁决：延续舞池速度 or 换曲归零） | 新增（FIX004.1 残余） |
+| 9 | engine.py:1121-1141 | `_mix_source_chunk` 丢循环回绕——loop 中转场出曲淡化期穿 loop 直冲曲尾静音（原 `_get_chunk` 有回绕） | **新增（FIX004.8 引入回归）** |
+| 10 | main_window.py:1351-1366 | mix 完成只滚 meta 不更新 `deck._bpm`/波形网格——混后 Beat FX 延迟/Trans/beat_jump 按旧曲 BPM，Jog 屏与 FX 时基不一致 | 新增（FIX004.1/.2 缺口） |
+
+#### P3（摘要，~20 项）
+
+engine：`_apply_rebias` 终装无二次守卫（E3 停盘复活换入口复现）｜stop 不清 `_mix_finished`（100ms stale 消费）｜完成重置缺 slip/key_shift/_reverse｜`_get_next_chunk` 死代码（FIX004.8 后零调用）｜fader 停止与 stop() 8 行重复（两轮同步改漂移风险）｜close 不关 CuePlayer（E10 未修）｜"弯音可用"注释失实｜analyzer：说明区两处失实（勾验不实本体）｜_detect_timbre 不传 hop（A3 未修）｜numba 目录堆积（A4 未修）｜tm：T2 曲终竞态/T3 死条件/T4 锁外读（三项未修）｜stretcher：S2 吞错未登记｜automix：AUTO 链不感知目标盘切换（late-bind 接缝）｜ui：bus lambda 强持有主窗（多窗 RuntimeError，需验证——生产单窗不可达）｜`deck._mix_finished` 私有直读直写｜silk 样式串 4 份重复｜手动 `_on_prepare` 忽略返回值（AUTO 路径有提示、手动静默同族不一致）｜波形播放头恒 deck_a 色｜贴图键无配色版本（遗留）｜弯音/deck_widget/jog 注释失实 3 处｜三处说明区缺新方法（_glow_params 重复条目）
+
+**A004 记录勘误**：P1#2"24-bit 数值保持 ±2^23 却除 2^31"定性不成立——pydub 构造器无条件 24→32 转换且数值 ×256 升满幅 ±2^31（实测逐值吻合）；真实 256 倍失真仅 8-bit 一档（÷32768 vs 实际 ±128）。当前修复后五档全部正确。
+
+### 二、参考级观察项（~25 项，含回落理由）
+
+_mix_source_chunk 推进-消费恒等零漂移（同式同 frames）；beat_frames clip 上界松而无害；32-bit float wav 经 ffmpeg int32 满幅正确（建议探针补第四档）；plan_set 弧线量纲 0-1 vs energy 1-10 不自洽（零调用预留，PL002 文档补量纲说明）；`_maybe_rebias` 锁外 timer 交错被 orig 守卫兜住（理论）；Censor/负向搜索不遵守 loop（黑胶语义）；AUTO 链 on_done=None 无反馈；`_cycle_theme` 二元 toggle 泛化空间；圆角不随 scale；量化后首次写盘 ≤31 次（达标）；`bind_theme` 自动断开（lambda 形态除外已列）；搓碟 dt 兜底（理论）等——豁免清单非空。
+
+### 三、亮点
+
+三路回归复核确认 FIX004 主体修复真实有效（引擎级断言扎实）；base.json/ui.json 全键矩阵核对终态**零死键零缺键**；audio_decode 五档实测行为全对；ui 组"业务 LED+checked 全按钮无降档漏网"、letter 闭包全对、ThemeBus 无泄漏；config 组发现 requirements 缺 audioop-lts 的**环境可复现性 P1**（冒烟门禁盲区的实证）。

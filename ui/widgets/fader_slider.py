@@ -48,6 +48,14 @@ class FaderSlider(ThemeAware, QWidget):
         self.setCursor(Qt.PointingHandCursor)
         self.bind_theme()  # J2
 
+    def set_range(self, min_value: float, max_value: float) -> None:
+        # 动态改值域（FIX004.18：Pitch 反显随 TEMPO 量程 ±6/±16/WIDE 重建，
+        # 消除 ±8 固定域的显示饱和）；当前值钳入新域
+        self._min = float(min_value)
+        self._max = float(max_value)
+        self._value = max(self._min, min(self._max, self._value))
+        self.update()
+
     def value(self) -> float:
         # 当前值
         return self._value

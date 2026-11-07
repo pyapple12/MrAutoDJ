@@ -5,9 +5,11 @@ PySide6>=6.6.0
 sounddevice>=0.5.0
 # 音频数组
 numpy>=1.26.0
-scipy>=1.11.0
+# scipy  # librosa 传递依赖（滤波），不直接 import（FIX004/N12），随 librosa 自动安装
 # 音频解码与读写
 soundfile>=0.12.1
 pydub>=0.25.1
+# audioop 兼容层（py3.13+ 标准库移除 audioop；pydub 依赖它做位深转换——FIX005.3）
+audioop-lts>=0.2.0; python_version >= "3.13"
 # 分析（BPM/调性/能量）
 librosa>=0.10.0

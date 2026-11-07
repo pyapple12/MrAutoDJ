@@ -9,7 +9,8 @@ from typing import Callable
 
 from config.static.static_config import get_static_config
 from modules.analyzer import parse_key
-from modules.transition import fold_ratio, TEMPO_MATCH_TOLERANCE
+from modules.transition import TEMPO_MATCH_TOLERANCE, fold_ratio
+from utils.convert import to_float
 
 # 静态配置解包（M2 编排参数，AGENTS.md 参数约定：零硬编码）
 _SC = get_static_config()
@@ -104,11 +105,11 @@ def energy_score(energy_a: float, energy_b: float) -> float:
 
 def timbre_score(timbre_a, timbre_b) -> float:
     # 音色兼容分：三维谱概要欧氏距离高斯衰减（σ 配置 automix_timbre_sigma）；
-    # 任一缺失 → 0.5
-    if not timbre_a or not timbre_b:
+    # 任一缺失/维度不齐 → 0.5（FIX004/M4：外部缓存宽容解析）
+    if not timbre_a or not timbre_b or len(timbre_a) != 3 or len(timbre_b) != 3:
         return _DIM_UNKNOWN
     dist = math.sqrt(
-        sum((float(x) - float(y)) ** 2 for x, y in zip(timbre_a, timbre_b))
+        sum((to_float(x) - to_float(y)) ** 2 for x, y in zip(timbre_a, timbre_b))
     )
     return float(math.exp(-((dist / _TIMBRE_SIGMA) ** 2)))
 
@@ -217,11 +218,15 @@ def _pick_step(
 ):
     # 单步选曲：过滤（已播/同艺人间隔）→ 评分（兼容 × 弧线贴合）→ 最高者；
     # 无可用候选返回 None。当前曲 = start（首步）或 sequence[-1]
-    recent_artists = [
-        e.get("artist") for e in sequence[-(_SAME_ARTIST_GAP - 1) :] if e.get("artist")
-    ]
-    if start is not None and not sequence and start.get("artist"):
-        recent_artists.append(start["artist"])
+    if _SAME_ARTIST_GAP <= 1:
+        recent_artists = []  # FIX004/M3：间隔≤1 即无约束（sequence[-0:] 会成全序列；
+        # start 艺人同样不排除——GAP=1 语义为"紧邻禁重复"已由顺序播放天然满足）
+    else:
+        recent_artists = [
+            e.get("artist") for e in sequence[-(_SAME_ARTIST_GAP - 1) :] if e.get("artist")
+        ]
+        if start is not None and not sequence and start.get("artist"):
+            recent_artists.append(start["artist"])
     current = sequence[-1] if sequence else start
     candidates = []
     for e in entries:
@@ -236,7 +241,10 @@ def _pick_step(
             comp = compatibility_score(current, e)
             base = comp["overall"]
             scores = comp["scores"]
-        fit = base * math.exp(-abs((e.get("energy") or 0) - target) / 0.3)
+        # FIX004/M5：能量缺失按中性 0.5 参与弧线拟合（原 0 会被高弧段
+        # 权重趋 0 惩罚，违背"缺失中性"声明）
+        e_now = e.get("energy") if e.get("energy") else 0.5
+        fit = base * math.exp(-abs(e_now - target) / 0.3)
         candidates.append((fit, e, scores))
     if not candidates:
         return None
@@ -281,35 +289,38 @@ class AutomixController:
         entry, comp, score = best
         return {"entry": entry, "explanation": _explanation(comp["scores"]), "score": score}
 
-    def prepare_next(self, now_deck, on_done=None) -> bool:
+    def prepare_next(self, now_deck, on_done=None) -> "dict | None":
         # 推荐并装填：经 tm.prepare（SKIP/STRETCH 与 downbeat 对齐全复用）；
-        # 失败（无推荐/守卫拒绝）返回 False
+        # 成功返回装填的 entry（调用方据此滚动 _deck_meta/pending），失败 None
         meta = self._now_meta_getter()
         rec = self.recommend(meta)
         if rec is None:
-            return False
+            return None
         entry = rec["entry"]
-        return bool(
-            self._tm.prepare(
-                now_deck,
-                meta.get("bpm", 0.0),
-                meta.get("downbeats", []),
-                entry["path"],
-                entry.get("bpm", 0.0),
-                entry.get("record", {}).get("downbeats", []),
-                cue_seconds=0.0,
-                on_done=on_done,
-            )
+        ok = self._tm.prepare(
+            now_deck,
+            meta.get("bpm", 0.0),
+            meta.get("downbeats", []),
+            entry["path"],
+            entry.get("bpm", 0.0),
+            entry.get("record", {}).get("downbeats", []),
+            cue_seconds=0.0,
+            on_done=on_done,
         )
+        return entry if ok else None
 
-    def on_mix_started(self, now_deck) -> None:
-        # 自动模式钩子（mix 启动后调用）：记录已播 + 链式装填下一曲
+    def on_mix_started(self, now_deck, finished_path: "str | None" = None) -> "dict | None":
+        # 自动模式钩子（mix 完成后由 UI 调用——FIX004.3 时序修正：原 mix_now
+        # 置 MIXING 后立即调用被 tm.prepare 的 PLAYING 守卫恒拒）：
+        # FIX005.2：记录**播完曲**（finished_path——旧曲，UI 在滚动 meta 前捕获）
+        # 入已播（防 A→B→A 回环）；链式装填下一曲；返回装填 entry
+        # （None=无推荐/守卫拒绝）。注意：正在播的来曲由 recommend 的
+        # "排除当前曲"天然排除，不入 _played
         if not self.auto_mode:
-            return
-        meta = self._now_meta_getter()
-        if meta.get("path"):
-            self._played.append(meta["path"])
-        self.prepare_next(now_deck)
+            return None
+        if finished_path:
+            self._played.append(finished_path)
+        return self.prepare_next(now_deck)
 
 
 # ===== modules/automix.py 模块说明 =====

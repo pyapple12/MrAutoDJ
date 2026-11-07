@@ -27,7 +27,8 @@ DEFAULT_FADE_SECONDS = float(_SC.base.get("default_fade_seconds", 16.0))
 # 变速恢复时长（秒，B1 默认 30s：STRETCH 缓冲渐变回原速的时长）
 DEFAULT_RESTORE_SECONDS = float(_SC.base.get("default_restore_seconds", 30.0))
 
-# 转场 EQ 渐变（PL002.10）：步数与步进间隔（秒）——low 从全切到 0 的斜坡，
+# 转场 EQ 渐变（PL002.10）：步数配置 + 步进间隔 = fade/(steps*2)（8 步在
+# 半程收尾，FIX004/T5 注释对齐实现）——low 从全切到 0 的斜坡，
 # 经 UI 线程等价的 setter 分步执行（回调线程零改动）
 EQ_RAMP_STEPS = int(_SC.base.get("eq_ramp_steps", 8))
 
@@ -196,9 +197,11 @@ class TransitionManager:
 
     def mix_now(self, now_deck) -> bool:
         # 混入已预备的来曲：样本级对齐（now_deck 下一个 downbeat 触发，SKIP 才可对齐）
-        # 或立即启动；MIXING/无缓冲/预备中一律拒绝（返回 False，B1 守卫纪律）
+        # 或立即启动；非 PLAYING/挂起中/无缓冲/预备中一律拒绝（返回 False，B1 守卫纪律）
         with self._lock:
-            if now_deck.state != State.PLAYING or now_deck.state == State.MIXING:
+            # FIX005/T3：死条件删除（MIXING 已被首条件排除）；补挂起重入拒绝
+            # （原注释声明但 pending 窗口未覆盖，二次 mix_now 覆盖缓冲）
+            if now_deck.state != State.PLAYING or now_deck.pending_mix:
                 return False
             if (
                 self._preparing
@@ -209,21 +212,26 @@ class TransitionManager:
             buf = self._next_prepared
             plan = self._next_plan
             fade = self._fade_seconds
+            downbeats = list(self._now_downbeats)  # FIX005/T4：随缓冲锁内取出
             # 取走缓冲后清空槽位（一次性消费，B1 纪律）
             self._next_prepared = None
             self._next_plan = None
 
         scheduled = None
-        if plan.skip and self._now_downbeats:
+        if plan.skip and downbeats:
             # 对齐：now_deck 下一个 downbeat（晚于当前位置+余量）；否则立即启动
             margin = int(MIX_TRIGGER_MARGIN_SECONDS * SAMPLE_RATE)
             candidates = [
-                d for d in self._now_downbeats if d > now_deck.position + margin
+                d for d in downbeats if d > now_deck.position + margin
             ]
             if candidates:
                 scheduled = candidates[0]
 
         now_deck.start_mix(buf, fade, scheduled_start_sample=scheduled)
+        # FIX005/T2：start_mix 守卫拒（取缓冲与调用间隙曲终置 IDLE）时如实
+        # 返回 False——原无条件 True 使 UI 误报"Mix 开始"且 pending 滞留
+        if now_deck.state == State.IDLE:
+            return False
         # 转场 EQ 渐变（PL002.10）：low 全切→0 斜坡；scheduled 时先等对齐触发
         # （延迟 = 触发点距当前位置的时长，避免触发前就切低频）
         with self._lock:

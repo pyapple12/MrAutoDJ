@@ -8,8 +8,8 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 
 - 入口 `main.py`：GUI 为默认模式；版本单一来源在 `config/static/base.json` 的 `version` 字段（三段式 `X.Y.Z`），其他模块用 `get_static_config().base["version"]` 引用
 - **提交前全量门禁（硬性工作流）**：改动涉及 `modules/`、`ui/`、`utils/`、`config/` 的提交，提交前必须跑全量探针回归（`.temp/` 下既有 probe 逐个 RESULT PASS）+ 冒烟 import（下方命令清单）+ 涉及视觉的出截图核对；不通过不得宣称完成，环境缺依赖先报告用户、不得静默跳过
-- 没有测试/lint 命令。改动后验证：`.\.venv\Scripts\python.exe -c "import main, modules.engine, modules.analyzer, modules.library, config.settings, config.static.static_config, ui.main_window, ui.deck_widget, ui.waveform_widget, ui.themes, utils.logger, utils.file_utils, utils.retry, utils.convert"`。不要直接跑 GUI 验证（会弹窗阻塞）
-- GUI 无头初始化验证（不弹窗）：`$env:QT_QPA_PLATFORM="offscreen"; .\.venv\Scripts\python.exe -c "from PyQt6.QtWidgets import QApplication; from ui.main_window import MainWindow; app = QApplication([]); w = MainWindow(); print('GUI init OK')"`
+- 没有测试/lint 命令。改动后验证（冒烟 import 全模块清单——FIX005.15 补全，新增模块须同步回填）：`.\.venv\Scripts\python.exe -c "import main, modules.engine, modules.analyzer, modules.library, modules.automix, modules.radio, modules.stretcher, modules.transition, modules.transition_manager, config.settings, config.static.static_config, ui.main_window, ui.beat_fx_widget, ui.deck_widget, ui.jog_wheel, ui.pad_widget, ui.palette, ui.scale, ui.shift_state, ui.themes, ui.waveform_widget, ui.widgets._skins, ui.widgets._textures, ui.widgets.fader_slider, ui.widgets.glow_button, ui.widgets.led_strip, ui.widgets.mini_display, ui.widgets.panel_frame, ui.widgets.rotary_knob, utils.logger, utils.file_utils, utils.retry, utils.convert, utils.audio_decode"`。不要直接跑 GUI 验证（会弹窗阻塞）；涉及解码链路（pydub 为延迟导入，import 冒烟测不出）另跑真实解码断言：合成 wav → `decode_audio` 查幅度
+- GUI 无头初始化验证（不弹窗）：`$env:QT_QPA_PLATFORM="offscreen"; .\.venv\Scripts\python.exe -c "from PySide6.QtWidgets import QApplication; from ui.main_window import MainWindow; app = QApplication([]); w = MainWindow(); print('GUI init OK')"`
 - 依赖（`requirements.txt`）：PySide6、sounddevice、librosa 等，按需添加（见 z.plan.md 技术栈）
 
 ## 环境陷阱
@@ -95,7 +95,8 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 - 宽容解析：外部数据（分析结果、配置）数字字段弹性转换，坏 JSON 返回空不崩溃，None 语义区分"未记录"与 0
 - 节流 + 去重：非必要不频繁刷新；in-flight 去重
 - 保留旧数据：刷新失败保留旧视图，成功后视图才替换
-- 只读防误写：分析缓存数据库一律只读连接（`mode=ro`）
+- 只读防误写：分析缓存数据库**消费侧**只读（未来任何外部消费方必须开 `file:...?mode=ro` + uri=True 只读连接）；缓存库当前仅经 AnalysisCache 单一连接读写（FIX005/A5 裁决对齐实现——原"专用短连接"表述与实现不符）
+- 渲染进度回调异常静默忽略（FIX005/S2 登记，stretcher `_safe_progress`）：场景——rubberband 渲染的进度回调（UI 层注入）抛错；降级行为——异常吞掉、渲染本体照常完成；理由——进度显示是装饰层，回调失败不得杀死渲染线程
 - **容错登记制**（2026-11-05 对齐 CapsulePulse）：以上降级条目即本项目的容错白名单——**新增任何静默兜底/降级必须先在此登记**，写明场景、降级行为与理由三要素；未登记的静默吞错一律按规范违反处理（错误要么向上传播、要么明确记录）
 
 ### 函数注释规则

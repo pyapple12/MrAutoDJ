@@ -58,8 +58,9 @@ CUE_PARAMS = dict(
     _SC.base.get("cue_params", {"max_cues": 8, "min_spacing": 8.0, "n_mfcc": 13})
 )
 
-# 缓存算法版本：检测算法变更时 +1，旧缓存自动失效重算（PL002.4：+timbre 字段 → 2）
-ANALYSIS_VERSION = 2
+# 缓存算法版本：检测算法变更时 +1，旧缓存自动失效重算（PL002.4 +timbre→2；
+# FIX004.7 downbeat 帧换算修正→3）
+ANALYSIS_VERSION = 3
 
 # Krumhansl-Kessler 调性谱（key.py 约定，24 键相关打分用）
 _KK_MAJOR = np.array(
@@ -448,9 +449,11 @@ def _detect_timbre(y: np.ndarray, sr: int) -> list[float]:
         mean = float(np.mean(series)) if len(series) else 0.0
         return float(np.clip((mean - lo) / (hi - lo), 0.0, 1.0))
 
-    centroid = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
-    bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr)[0]
-    rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr, roll_percent=0.85)[0]
+    centroid = librosa.feature.spectral_centroid(y=y, sr=sr, hop_length=ANALYSIS_HOP)[0]
+    bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr, hop_length=ANALYSIS_HOP)[0]
+    rolloff = librosa.feature.spectral_rolloff(
+        y=y, sr=sr, roll_percent=0.85, hop_length=ANALYSIS_HOP
+    )[0]
     return [
         _norm(centroid, 200.0, 6000.0),
         _norm(bandwidth, 200.0, 4000.0),
@@ -551,8 +554,11 @@ def analyze_file(path: str, with_cues: bool = True) -> dict:
     engine_sr = int(_SC.base.get("sample_rate", 44100))
     beats = (beat_times * engine_sr).round().astype(int).tolist()
     # downbeat：低频能量相位选择（每 4 拍取强拍相位），至少 16 拍才判定
+    # （FIX004.7：帧号 = 秒 × sr / hop——原缺采样率因子致 beat_frames≈0、
+    # 相位探测自 V0.1 从未生效恒 phase 0）
     if len(beats) >= 16:
-        beat_frames = (beat_times / ANALYSIS_HOP).round().astype(int)
+        beat_frames = (beat_times * ANALYSIS_SAMPLE_RATE / ANALYSIS_HOP).round().astype(int)
+        beat_frames = np.clip(beat_frames, 0, len(y) - 1)
         phase = _pick_downbeat_phase(beat_frames, y, ANALYSIS_SAMPLE_RATE)
         downbeats = beats[phase::4]
     else:
@@ -706,10 +712,17 @@ def _default_workers() -> int:
     return max(1, (os.cpu_count() or 2) - 2)
 
 
+_NUMBA_DIR: str | None = None
+
+
 def _warm_worker() -> None:
-    # worker 初始化：隔离 numba JIT 缓存（多进程并发写共享缓存会损坏导致段错误；
-    # I3.3：tempfile 顶层导入，函数内 import 全清）
-    os.environ["NUMBA_CACHE_DIR"] = tempfile.mkdtemp(prefix="mrautodj-numba-")
+    # worker 初始化：隔离 numba JIT 缓存（多进程并发写共享缓存会损坏导致段错误）；
+    # FIX005/A4：复用模块级固定目录（原每 worker mkdtemp 从不清理，批量分析
+    # 在系统临时目录累积）
+    global _NUMBA_DIR
+    if _NUMBA_DIR is None:
+        _NUMBA_DIR = tempfile.mkdtemp(prefix="mrautodj-numba-")
+    os.environ["NUMBA_CACHE_DIR"] = _NUMBA_DIR
 
 
 def _analyze_task(path: str, with_cues: bool) -> dict:
@@ -858,7 +871,8 @@ if __name__ == "__main__":
 #   ANALYSIS_SAMPLE_RATE=22050 / ANALYSIS_HOP=512：分析路径参数（base.json）
 #   SUPPORTED_EXTENSIONS：支持的音频扩展集合（D1.1）
 #   MIN_BPM=70 / MAX_BPM=180：BPM 合理区间（DJ 折半/加倍折叠用）
-#   ANALYSIS_VERSION=1：缓存算法版本（检测算法变更 +1，旧缓存自动失效）
+#   ANALYSIS_VERSION=3：缓存算法版本（检测算法变更 +1，旧缓存自动失效；
+#     2=+timbre 字段、3=downbeat 帧换算修正）
 #   _KK_MAJOR/_KK_MINOR：Krumhansl-Kessler 调性谱（24 键相关打分用）
 # 类型：
 #   Key(frozen dataclass)：调性对象（pitch_class/mode + standard/camelot 记谱）
@@ -869,7 +883,7 @@ if __name__ == "__main__":
 #   _cache_dir()：SQLite 缓存路径解析（cache_path 配置）
 #   _default_workers()：进程池 worker 数（核数-2 受内存限制）
 #   _warm_worker()：worker 初始化（numba 缓存隔离：每进程私有临时目录）
-#   _analyze_task(path, with_cues)：进程池任务入口（返回 (path, record, error)）
+#   _analyze_task(path, with_cues)：进程池任务入口（返回 record，异常由批处理回调上报）
 #   main()：CLI 入口（--folder 批量分析 --json 输出）
 #   parse_key(text)：标准记谱解析（"Am"/"C"/"F#m"）
 #   _fold_bpm/_snap_bpm/_refine_bpm：BPM 折叠/吸附/精修（纯函数可单测）

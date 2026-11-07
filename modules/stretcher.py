@@ -215,8 +215,9 @@ def make_transition_buffer(
     start_rate: float,
     fade_seconds: float,
     restore_seconds: float,
-    sample_rate: int = 44100,
     progress_callback: Callable[[float], None] | None = None,
+    *,
+    sample_rate: int,  # FIX005/S1：keyword-only 必填（调用方显式传 SAMPLE_RATE，防默认字面量与配置漂移）
 ) -> np.ndarray:
     # 变速渲染整段来曲余量：fade 秒恒速 start_rate → restore 秒 smootherstep 回 1.0 → 1.0 到结尾
     # I0.5：空输入/空 timemap 防御（CUE 越过曲尾时 cue 切片为空 → 原 timemap[-1]
@@ -260,8 +261,9 @@ def make_tempo_buffer(
     audio: np.ndarray,
     rate: float,
     semitones: float = 0.0,
-    sample_rate: int = 44100,
     progress_callback: Callable[[float], None] | None = None,
+    *,
+    sample_rate: int,  # FIX005/S1：keyword-only 必填
 ) -> np.ndarray:
     # 恒速拉伸缓冲（J1.1 Keylock/Key Shift 重渲染）：整段按 rate 恒速映射
     # （输出时长 = 原时长/rate），可选 --pitch 半音变调；rate≈1 且不变调时
@@ -309,8 +311,9 @@ def make_tempo_buffer(
 def make_keylock_buffer(
     audio: np.ndarray,
     semitones: float,
-    sample_rate: int = 44100,
     progress_callback: Callable[[float], None] | None = None,
+    *,
+    sample_rate: int,  # FIX005/S1：keyword-only 必填
 ) -> np.ndarray:
     # 变调不变速（Keylock）：rubberband --pitch 半音（保持时长，仅移动音高）
     def _args(tmpdir: str) -> list[str]:

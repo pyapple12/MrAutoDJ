@@ -17,7 +17,6 @@
   "glow_white": "#e8ecf0",
   "pad_colors": ["#ff7a2f", "#00cccc", "#2fe37a", "#ff4444", "#ffcc00"],
   "table_headers": ["状态", "曲名", "BPM", "调性", "能量"],
-  "quota_warn_percent": 80,
   "jog_bend_reset_ms": 80,
   "jog_bend_step": 0.05,
   "jog_scratch_gain": 256,

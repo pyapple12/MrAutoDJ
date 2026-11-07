@@ -31,14 +31,22 @@ class PanelFrame(ThemeAware, QFrame):
             self._make_label(title)
 
     def _make_label(self, title: str) -> None:
-        # 创建丝印标题 QLabel（silk 色按当前主题现取，J2）
-        silk = palette.color("silk_text", "#8a9099")
+        # 创建丝印标题 QLabel（silk 色按当前主题现取，J2；样式串走 silk helper
+        # ——FIX005/P3-11 去 4 份重复）
         self._label = QLabel(title.upper(), self)
         self._label.setStyleSheet(
-            f"color: {silk.name(QColor.HexRgb)}; font-weight: 600; "
-            f"letter-spacing: 3px; background: transparent;"
+            palette.silk_label_style("font-weight: 600; letter-spacing: 3px; ")
         )
         self._label.move(12, 6)
+
+    def _on_theme_changed(self, name: str) -> None:
+        # 主题切换（FIX004.17）：清静态缓存 + 丝印标题 QLabel 样式重设
+        # （内联样式不随 QSS 刷新——原切换后浅底残留深色 silk）
+        super()._on_theme_changed(name)
+        if hasattr(self, "_label"):
+            self._label.setStyleSheet(
+                palette.silk_label_style("font-weight: 600; letter-spacing: 3px; ")
+            )
 
     def set_title(self, title: str) -> None:
         # 运行期改标题（G0.6：无标题构造时惰性创建标签，防 AttributeError）

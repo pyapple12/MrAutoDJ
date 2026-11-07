@@ -76,6 +76,7 @@ def save_config(config: AppConfig) -> None:
 #   save_config(config)：write_json 原子写（.tmp + os.replace）
 # 设计理由：配置聚合用 dataclass（AGENTS.md 约定）；失败永不崩溃
 #   （AGENTS.md 错误策略：宽容解析）
-# 异常处理：读写异常全部由 file_utils 宽容消化
+# 异常处理：读路径由 file_utils 宽容消化（坏文件返默认）；写路径 write_json
+#   清理 tmp 后重抛（FIX004/N2：原"全部宽容"表述失实）
 # 关联配置：config/static/base.json（user_config_path/default_theme/themes）
 

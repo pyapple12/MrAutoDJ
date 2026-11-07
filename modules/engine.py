@@ -49,7 +49,6 @@ DELAY_PRESET = dict(
 KNOB_DEADZONE = float(
     _SC.base.get("knob_deadzone", 0.01)
 )  # EQ 死区/FX 最小深度/Fader Start
-FX_TRANS_LADDER = [int(v) for v in _SC.base.get("fx_trans_ladder", [0, 4, 8, 16, 32])]
 FX_HPF_RANGE = [float(v) for v in _SC.base.get("fx_hpf_range", [300.0, 4000.0])]
 FX_LPF_RANGE = [float(v) for v in _SC.base.get("fx_lpf_range", [10000.0, 250.0])]
 FX_ECHO_DEPTH = [float(v) for v in _SC.base.get("fx_echo_depth", [0.3, 0.4])]
@@ -292,8 +291,11 @@ class FeedbackDelay:
         self._n_taps = 1
 
     def configure(self, delay_seconds: float, feedback: float, n_taps: int = 1) -> None:
-        # 配置延迟时长/反馈量/多 tap 数（参数变更防咔嗒：旧缓冲保留继续写）
-        self._delay = max(1, int(delay_seconds * self.sr))
+        # 配置延迟时长/反馈量/多 tap 数（参数变更防咔嗒：旧缓冲保留继续写）；
+        # 延迟统一钳缓冲容量内（FIX004/E8：直通路径与 FX 延迟路径同一钳制，
+        # 消除配置超 2s 时两路径行为分叉）
+        max_delay = self._buf_len - 2 * BLOCK_SIZE
+        self._delay = max(1, min(int(delay_seconds * self.sr), max_delay))
         self._feedback = max(0.0, min(0.95, float(feedback)))
         self._n_taps = max(1, min(4, int(n_taps)))
 
@@ -414,6 +416,9 @@ class Deck:
         self._tap_times: list[float] = []
         # Censor：按住期间反向播放
         self._reverse: bool = False
+        # Mix 完成标记（FIX004.1：_fill_mixing 淡出换缓冲时置位，UI 轮询消费——
+        # 触发 _deck_meta 滚动与 AUTO 链式装填；消费方负责清零）
+        self._mix_finished: bool = False
         # Trans 门控相位（跨块持续）
         self._trans_phase: int = 0
         # Beat FX 拍数（J1.1：Echo/Delay 延迟 = beats/4 拍、Trans 门控周期，BPM 驱动）
@@ -423,7 +428,7 @@ class Deck:
 
     def play(self, audio: np.ndarray) -> None:
         # 从头播放整段音频（清状态/CUE 保持/循环关闭/EQ 状态清零；
-        # 重置烘焙域与乐速——新曲从原始缓冲开始，J1.1）
+        # 重置烘焙域与乐速/调移——新曲从原始缓冲开始，J1.1+FIX004.1/E6）
         with self._lock:
             self._now_audio = audio
             self._orig_audio = audio
@@ -436,8 +441,10 @@ class Deck:
             self._tempo_rate = 1.0
             self._baked_rate = 1.0
             self._baked_semitones = 0
+            self._key_shift = 0  # E6：换曲调移清零（Pad 灯与新曲音频一致）
             self._scratch_fpos = 0.0
             self._scratch_pending = 0
+            self._mix_finished = False
             self.eq.reset()
 
     def pause(self) -> None:
@@ -446,16 +453,40 @@ class Deck:
             self._paused = not self._paused
 
     def stop(self) -> None:
-        # 停止：清空音频与状态（CUE 保留，EQ 状态清零）
+        # 停止：清空音频与状态（CUE 保留，EQ 状态清零）；清原始缓冲并取消
+        # 在途重渲染（FIX004/E3）与完成标记（FIX005.12：防 100ms stale 消费
+        # 在 IDLE 盘上误滚 meta/误报 AUTO 提示）
         with self._lock:
-            self.state = State.IDLE
-            self._now_audio = None
-            self._next_audio = None
-            self._position = 0
-            self._paused = False
-            self._pending_mix_at = None
-            self._loop_active = False
-            self.eq.reset()
+            self._reset_playback_locked()
+
+    def _reset_playback_locked(self) -> None:
+        # 播放域清理（须持锁；FIX005/②-12：stop 与 fader 停止两处共用——
+        # 原两处内联 8 行已两轮同步改，抽单点防继续漂移）
+        self.state = State.IDLE
+        self._now_audio = None
+        self._next_audio = None
+        self._orig_audio = None
+        self._position = 0
+        self._paused = False
+        self._pending_mix_at = None
+        self._loop_active = False
+        self._mix_finished = False
+        self._cancel_rebias()
+        self.eq.reset()
+
+    def _cancel_rebias(self) -> None:
+        # 取消在途重渲染去抖定时器（须持锁；FIX004/E3）
+        if self._rebias_timer is not None:
+            self._rebias_timer.cancel()
+            self._rebias_timer = None
+
+    def take_mix_finished(self) -> bool:
+        # mix 完成标记读取即清（FIX005.17：公开接口替代 UI 直访私有字段；
+        # 原子读清——UI 100ms 轮询消费）
+        with self._lock:
+            flag = self._mix_finished
+            self._mix_finished = False
+            return flag
 
     # --- CUE（D2.10） ---
 
@@ -626,6 +657,11 @@ class Deck:
         with self._lock:
             if self._rebias_epoch != my_epoch:
                 return
+            # FIX005.11：终装二次守卫（E3 换入口防护——渲染 1-2s 窗内 stop()
+            # 已清 orig/置 IDLE 时不得把缓冲装回已停盘，否则 cue_play/stutter
+            # 可让"已停止"的盘出声）
+            if self._orig_audio is None or self.state == State.IDLE:
+                return
             if (target_rate, self._key_shift) != (target_rate, target_shift):
                 return  # 渲染期间参数又变
             self._swap_buffer(buf, target_rate, target_shift)
@@ -646,6 +682,12 @@ class Deck:
             self._slip_actual = int(self._slip_actual * factor)
             self._scratch_fpos *= factor
             self._scratch_pending = int(self._scratch_pending * factor)
+            # FIX004.10：挂起定时切歌点同步换算（旧域样本 → 新烘焙域；
+            # 越新曲尾则钳尾——触发丢失好过错位跳读）
+            if self._pending_mix_at is not None:
+                self._pending_mix_at = min(
+                    len(new_audio), max(0, int(self._pending_mix_at * factor))
+                )
         self._position = max(0, min(self._position, len(new_audio)))
 
     def _beat_len(self, bpm: float) -> int:
@@ -734,6 +776,13 @@ class Deck:
         with self._lock:
             return self._loop_active
 
+    @property
+    def pending_mix(self) -> bool:
+        # 定时切歌挂起中（FIX005/T3：tm.mix_now 重入拒绝的公开判据——
+        # 原"MIXING 拒绝"注释无实现，pending 窗口二次 mix 会覆盖缓冲）
+        with self._lock:
+            return self._pending_mix_at is not None
+
     # --- E1.7 Sampler 槽位 ---
 
     def sample_load(self, slot: int, audio: np.ndarray) -> None:
@@ -794,6 +843,7 @@ class Deck:
             bpm = 60.0 / median
             if bpm > 0:
                 self._bpm = bpm
+                self._apply_fx_delay_locked()  # FIX004/E7：Tap 定速后 FX 延迟随新 BPM 重配
             return bpm
 
     def censor(self, active: bool) -> None:
@@ -1095,11 +1145,43 @@ class Deck:
         self._scratch_fpos = fpos + pending
         self._position = max(0, min(int(round(self._scratch_fpos)), len(audio)))
 
+    def _mix_source_chunk(self, audio: np.ndarray | None, pos: int, frames: int, factor: float) -> np.ndarray:
+        # 混音源取块（FIX004.8）：factor==1 直通补零；≠1 时 step 插值到 frames
+        # （出曲按实时变速因子继续）；FIX005.9：loop 激活按回绕位置取块并跨
+        # loop_end 续读（原 _get_chunk 有回绕、插值路径丢失——loop 中转场出曲
+        # 穿 loop 直冲曲尾静音的回归修复）
+        if audio is None:
+            return np.zeros((frames, CHANNELS), dtype=np.float32)
+        need = frames if factor == 1.0 else max(1, int(round(frames * factor)))
+        if self._loop_active and self._loop_end > self._loop_start and pos >= self._loop_start:
+            loop_len = self._loop_end - self._loop_start
+            pos = self._loop_start + ((pos - self._loop_start) % loop_len)
+            chunk = audio[pos : pos + need]
+            if len(chunk) < need:  # 跨 loop_end：回绕到 loop_start 续读
+                wrap = audio[self._loop_start : self._loop_start + (need - len(chunk))]
+                chunk = np.concatenate([chunk, wrap], axis=0)
+        else:
+            chunk = audio[pos : pos + need]
+            if len(chunk) < need:
+                pad = np.zeros((need - len(chunk), CHANNELS), dtype=np.float32)
+                chunk = np.concatenate([chunk, pad], axis=0)
+        if factor == 1.0:
+            return chunk
+        idx = np.linspace(0.0, need - 1.0, frames)
+        i0 = idx.astype(np.int64)
+        i1 = np.minimum(i0 + 1, need - 1)
+        w = (idx - i0).astype(np.float32)[:, None]
+        return chunk[i0] * (1.0 - w) + chunk[i1] * w
+
     def _fill_mixing(self, out: np.ndarray, frames: int) -> None:
-        # 交叉淡化填充：逐帧线性渐变（等功率曲线作用于主输出 Crossfader，
-        # 与本函数无关——I3.4 注释失实修正）
-        now_chunk = self._get_chunk(frames)
-        nxt_chunk = self._get_next_chunk(frames)
+        # 交叉淡化填充：逐帧线性渐变（等功率曲线作用于主输出 Crossfader）；
+        # 出曲按乐速因子插值（FIX004.8：Keylock 关+TEMPO≠1 时混音期速度连续、
+        # 弯音可用）；完成换缓冲按 play() 同款重置演奏/烘焙域（FIX004.1——
+        # 旧曲循环/烘焙/刮擦域不得套在来曲上，_orig_audio 置 None 使后续
+        # rebias 安全跳过）并置 _mix_finished 供 UI 消费（meta 滚动/AUTO 链）
+        factor = self._tempo_rate / self._baked_rate if self._baked_rate > 0 else 1.0
+        now_chunk = self._mix_source_chunk(self._now_audio, self._position, frames, factor)
+        nxt_chunk = self._mix_source_chunk(self._next_audio, self._mix_pos, frames, 1.0)
 
         t0 = min(self._mix_pos / self._fade_samples, 1.0)
         t1 = min((self._mix_pos + frames) / self._fade_samples, 1.0)
@@ -1108,7 +1190,7 @@ class Deck:
 
         out[:] = now_chunk * fade_out + nxt_chunk * fade_in
 
-        self._position += frames
+        self._position += max(1, int(round(frames * factor)))
         self._mix_pos += frames
 
         if self._mix_pos >= self._fade_samples:
@@ -1117,6 +1199,24 @@ class Deck:
             self._next_audio = None
             self._mix_pos = 0
             self.state = State.PLAYING
+            # FIX004.1：来曲成为 now——旧曲演奏/烘焙域全部失效；
+            # FIX005.8 域语义裁决：**延续舞池速度**（_tempo_rate/_keylock_on
+            # 不重置——mix 后 TEMPO 推子位置不变、音乐速度连续，DJ 惯例）；
+            # 移调/Slip/Censor 不延续（换曲归零，与 play() 一致）
+            self._baked_rate = 1.0
+            self._baked_semitones = 0
+            self._orig_audio = None
+            self._loop_active = False
+            self._loop_start = 0
+            self._loop_end = 0
+            self._pending_mix_at = None
+            self._scratch_pending = 0
+            self._scratch_fpos = float(self._position)
+            self._key_shift = 0
+            self._slip_active = False
+            self._slip_actual = 0
+            self._reverse = False
+            self._mix_finished = True
 
     def _get_chunk(self, frames: int) -> np.ndarray:
         # 取当前音频块（循环回绕 + 越界补零）；返回 (frames, 2) float32
@@ -1134,16 +1234,8 @@ class Deck:
             chunk = np.concatenate([chunk, pad], axis=0)
         return chunk
 
-    def _get_next_chunk(self, frames: int) -> np.ndarray:
-        # 取来曲缓冲块（越界补零）
-        audio = self._next_audio
-        if audio is None:
-            return np.zeros((frames, CHANNELS), dtype=np.float32)
-        chunk = audio[self._mix_pos : self._mix_pos + frames]
-        if len(chunk) < frames:
-            pad = np.zeros((frames - len(chunk), CHANNELS), dtype=np.float32)
-            chunk = np.concatenate([chunk, pad], axis=0)
-        return chunk
+    # FIX005/E 组：_get_next_chunk 删除（FIX004.8 后零调用——来曲块由
+    # _mix_source_chunk 统一承担）
 
     def _get_chunk_reverse(self, frames: int) -> np.ndarray:
         # 反向取块（Censor/负向搜索）：从当前位置向前取 frames 样本并倒序
@@ -1236,7 +1328,7 @@ class Deck:
             base, slope = FX_DELAY_DEPTH
             preset = DELAY_PRESET
         self._fx_delay.configure(
-            min(delay, 1.9),  # 钳制缓冲上限（2.0s）内
+            min(delay, 1.9),  # 钳缓冲上限内（configure 亦钳，双保险）
             base + slope * self._fx_depth,
             n_taps=int(preset.get("taps", 1)),
         )
@@ -1251,8 +1343,8 @@ class Deck:
         elif effect in ("Echo", "Delay"):
             self._fx_delay.process(out, len(out))
         elif effect == "Trans" and self._bpm > 0:
-            # 节拍门控：50% 占空比；周期 = beats/4 拍（J1.1 拍数接线，
-            # BPM 未知时退回深度阶梯 FX_TRANS_LADDER）
+            # 节拍门控：50% 占空比；周期 = beats/4 拍（J1.1 拍数接线；
+            # BPM 未知时 Trans 不生效——无时基则门控无意义）
             beat = self.sr * 60.0 / self._bpm
             period = max(2.0, beat * self._fx_beats / 4.0)
             n = len(out)
@@ -1350,15 +1442,8 @@ class AudioEngine:
                     if deck.state == State.IDLE and deck._now_audio is not None:
                         deck.state = State.PLAYING
                 else:
-                    # 拉到底停止（锁内联实现，等价 deck.stop() 的清理）
-                    deck.state = State.IDLE
-                    deck._now_audio = None
-                    deck._next_audio = None
-                    deck._position = 0
-                    deck._paused = False
-                    deck._pending_mix_at = None
-                    deck._loop_active = False
-                    deck.eq.reset()
+                    # 拉到底停止（FIX005/②-12：共用 _reset_playback_locked）
+                    deck._reset_playback_locked()
 
     def set_fader_start(self, enabled: bool) -> None:
         # 开关 Fader Start 模式（推子从 0 推起=播放、拉到底=停止）
@@ -1398,12 +1483,19 @@ class AudioEngine:
     # --- 关闭 ---
 
     def close(self) -> None:
-        # 停止并关闭输出流
+        # 停止并关闭输出流（FIX005/E10：连带关闭监听流——原仅主流，
+        # 第二输出流靠进程退出回收）
         try:
             self._stream.stop()
             self._stream.close()
         except Exception:
             pass
+        if self._cue_player is not None:
+            try:
+                self._cue_player.close()
+            except Exception:
+                pass
+            self._cue_player = None
 
     # --- 实时回调（D2.15：零 IO、锁内短、异常 fail-soft 静音） ---
 

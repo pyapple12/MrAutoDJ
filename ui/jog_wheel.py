@@ -72,7 +72,8 @@ class JogWheel(ThemeAware, QWidget):
     # --- 事件 ---
 
     def wheelEvent(self, event) -> None:
-        # 滚轮：外圈弯音（Vinyl 关或未触摸）；SHIFT+滚=高速搜索
+        # 滚轮：外圈弯音脉冲（累积+定时归零，FIX005 注释对齐实现——原
+        # "Vinyl 关或未触摸"条件从未实现）；SHIFT+滚=高速搜索
         delta = event.angleDelta().y()
         if delta == 0:
             return

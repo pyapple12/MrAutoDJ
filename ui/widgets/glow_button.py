@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QRadialGradient
 from PySide6.QtWidgets import QAbstractButton
 
@@ -26,7 +26,6 @@ class GlowButton(ThemeAware, QAbstractButton):
         self._led_on = False
         self._led_color = palette.color("glow_white", "#e8ecf0")
         self._outline_active = False  # 描边激活模式（PL001.11：checked 画描边不整面辉光）
-        self._checked_tier = False  # checked 辉光降档开关（PL001.11：普通按钮勾选态降噪）
         self.setCursor(Qt.PointingHandCursor)
         self.setMinimumSize(
             s(int(_UI.get("button_min_width", 32))),
@@ -37,11 +36,6 @@ class GlowButton(ThemeAware, QAbstractButton):
     def set_outline_active(self, on: bool) -> None:
         # 描边激活模式开关（PL001.11：checked 时画 led 色描边 + 亮字，不整面辉光）
         self._outline_active = bool(on)
-        self.update()
-
-    def set_checked_tier(self, on: bool) -> None:
-        # checked 辉光降档开关（PL001.11：普通勾选按钮降噪，防抢主操作）
-        self._checked_tier = bool(on)
         self.update()
 
     def text_fits(self) -> bool:
@@ -57,18 +51,18 @@ class GlowButton(ThemeAware, QAbstractButton):
     def sizeHint(self) -> "QSize":
         # 文本驱动尺寸（PL001.2 根因修复：QAbstractButton 无 sizeHint 覆写时布局
         # 只给最小宽 32px——全部截断的源头）；宽度 = 文本宽 + 8px 边距，高 = 基准
-        from PySide6.QtCore import QSize
-
         fm = QFontMetrics(self.font())
         return QSize(max(s(32), fm.horizontalAdvance(self.text()) + 8), s(32))
 
     def _glow_params(self) -> tuple[float, int, int]:
-        # 辉光参数（PL001.11/14）：(半径系数, 外圈 alpha, 中圈 alpha)
-        # 按压 = 全强度；checked 降档开关 = 半径 ×0.85 + alpha 降档；light 主题整体降档
+        # 辉光参数（PL001.11/14 + FIX004.12）：(半径系数, 外圈 alpha, 中圈 alpha)
+        # 按压 = 全强度；**checked 默认降档**（勾选键不抢主操作——业务 LED 亮时
+        # 除外：模式键/播放键等状态指示保持全强度）；描边激活走独立分支不进此；
+        # light 主题整体降档
         light = palette.current() == "light"
         if self.isDown():
             return (1.0, 150, 70) if light else (1.0, 220, 110)
-        if self._checked_tier and self.isChecked():
+        if self.isChecked() and not self._led_on:
             return (0.85, 90, 45) if light else (0.85, 150, 75)
         return (1.0, 150, 70) if light else (1.0, 220, 110)
 
@@ -159,7 +153,8 @@ class GlowButton(ThemeAware, QAbstractButton):
 #     light 主题整体降档——防激活态抢主操作与浅底光晕发脏）
 #   set_outline_active(on)：描边激活模式（PL001.11：checked 画 led 描边 +
 #     亮字不整面辉光；FX ON 用）
-#   set_checked_tier(on)：checked 辉光降档开关（普通勾选按钮降噪）
+#   _glow_params()：辉光分档（FIX004.12：checked 无业务 LED 默认降档——
+#     原 set_checked_tier 死开关废弃，改默认生效）
 #   绘制：常态内凹座 + silk 文字；按下/checked/led_on 辉光（分档）+ 白字；
 #     描边激活态描边 + 微透底；超宽文本先降一档字号再省略（PL001.2）
 # 设计理由：LED 灯态独立于 checked（业务灯态与交互态分离，E2.7 灯阵复用）；

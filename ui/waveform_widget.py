@@ -45,8 +45,14 @@ class WaveformWidget(ThemeAware, QWidget):
         self._position: int = 0
         self._duration: int = 0
         self._grid: list[int] = []  # 下拍样本位置（PATCH001.3：对拍网格）
+        self._playhead_key = "deck_a"  # 播放头色 token 键（FIX005/P3-13：按盘注入）
         self.setMinimumHeight(56)
         self.bind_theme()  # J2
+
+    def set_playhead_key(self, key: str) -> None:
+        # 播放头色 token 键（FIX005/P3-13：deck_a/deck_b——B 盘不再用 A 青色）
+        self._playhead_key = key
+        self.update()
 
     def set_grid(self, downbeats: list) -> None:
         # 设置下拍网格（样本位置列表，PATCH001.3）：随 set_audio 的 _duration
@@ -102,7 +108,7 @@ class WaveformWidget(ThemeAware, QWidget):
         # 播放头
         if self._duration > 0:
             px = int(self._position / self._duration * (w - 1))
-            painter.setPen(QPen(palette.color("deck_a", "#00cccc"), 2))
+            painter.setPen(QPen(palette.color(self._playhead_key, "#00cccc"), 2))
             painter.drawLine(px, 0, px, h - 1)
         painter.end()
 

@@ -33,7 +33,7 @@ class DeckWidget(QWidget):
     loop_toggled = Signal(bool)
     beatloop_clicked = Signal(int)
     keylock_toggled = Signal(bool)
-    pitch_changed = Signal(float)  # 百分比（-8..8）
+    pitch_changed = Signal(float)  # 百分比（域随 TEMPO 量程动态 ±6/±16/WIDE——FIX005.18 注释对齐）
     loop_in_clicked = Signal()  # J1.0：循环入点
     loop_out_clicked = Signal()  # J1.0：循环出点
     loop_fourbeat_clicked = Signal()  # J1.0：4 拍自动循环
@@ -151,10 +151,19 @@ class DeckWidget(QWidget):
         self._play_btn.setText("暂停" if is_playing else "播放")
         self._play_btn.set_led(is_playing, _UI.get("glow_orange", "#ff7a2f"))
 
+    def set_pitch_range(self, percent: float) -> None:
+        # Pitch 滑块域随 TEMPO 量程重建（FIX004.18：±6/±16/WIDE 下反显不再
+        # 被 ±8 固定域饱和）
+        r = max(1.0, abs(float(percent)))
+        self._pitch_slider.set_range(-r, r)
+        self._pitch_slider.blockSignals(True)
+        self._pitch_slider.set_value(0.0)
+        self._pitch_slider.blockSignals(False)
+
     def set_pitch_display(self, percent: float) -> None:
         # Pitch 滑块转为量程指示（J1.1：实时变速由 TEMPO 推子驱动，此滑块只读
-        # 反显当前乐速百分比；blockSignals 防回环；PL001.12 起为 FaderSlider）
-        percent = max(-8.0, min(8.0, float(percent)))
+        # 反显当前乐速百分比；blockSignals 防回环；域由 set_pitch_range 随量程）
+        percent = float(percent)
         self._pitch_slider.blockSignals(True)
         self._pitch_slider.set_value(percent)
         self._pitch_slider.blockSignals(False)
@@ -188,6 +197,7 @@ class DeckWidget(QWidget):
 #   set_pitch_display(percent)：Pitch 量程只读反显（J1.1；PL001.12 起滑块为
 #     FaderSlider 拟物件，blockSignals 防回环）
 #   set_sync_active(on)：SYNC 勾选与灯态外部同步（J1.0）
-# 设计理由：控件零引擎依赖（信号解耦，B1"UI 只发指令"）；Pitch 用整数百分比滑块
+# 设计理由：控件零引擎依赖（信号解耦，B1"UI 只发指令"）；Pitch 为 FaderSlider
+#   拟物滑块（PL001.12/FIX004.18，量程只读反显随 TEMPO 量程重建）
 # 关联配置：config/static/ui.json（glow_orange 播放 LED 色）；
 #   config/static/base.json（sample_rate → _SR 进度换算，I3.4 补录）

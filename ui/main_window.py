@@ -8,7 +8,7 @@ import time as _time
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 
 from config.static.static_config import get_static_config
 from modules import analyzer as analyzer_mod
-from modules.engine import AudioEngine, EQ_GAIN_DB, SLOT_COUNT, State
+from modules.engine import AudioEngine, EQ_GAIN_DB, JOG_BEND_MAX, SLOT_COUNT, State
 from modules import library as library_mod
 from modules.automix import AutomixController
 from modules.stretcher import rubberband_available
@@ -38,6 +38,7 @@ from ui.jog_wheel import JogWheel
 from ui.pad_widget import PadWidget
 from ui import palette
 from ui.scale import s
+from ui.themes import switch_theme  # FIX004/②-9：顶层导入（原 _cycle_theme 函数内）
 from ui.shift_state import ShiftState
 from ui.widgets.fader_slider import FaderSlider
 from ui.widgets.glow_button import GlowButton
@@ -58,8 +59,10 @@ _logger = get_logger(__name__)
 _SP_SM = s(int(_UI.get("spacing_sm", 4)))
 _SP_MD = s(int(_UI.get("spacing_md", 8)))
 _SP_LG = s(int(_UI.get("spacing_lg", 12)))
-_KNOB_MIXER = s(int(_UI.get("knob_size_mixer", 32)))
-_KNOB_FX = s(int(_UI.get("knob_size_fx", 28)))
+# FIX004.16：旋钮尺寸基准裸值（RotaryKnob 构造内统一 s()——原调用点再 s()
+# 致 ui_scale≠1 时双重放大）
+_KNOB_MIXER = int(_UI.get("knob_size_mixer", 32))
+_KNOB_FX = int(_UI.get("knob_size_fx", 28))
 _LIB_PCT = int(_UI.get("splitter_library_pct", 18))
 
 
@@ -128,6 +131,9 @@ class MainWindow(QMainWindow):
         # 弯音脉冲归零（P2 修复）：每盘 pending 值 + 单发定时器（超时调 jog_bend(0)）
         self._bend_pending: dict = {"a": 0.0, "b": 0.0}
         self._bend_timers: dict = {}
+        # Mix 装填的来曲 entry（FIX004.2：mix 完成时经 _tick 滚动 _deck_meta；
+        # FIX005.6：按盘键控——单槽在双盘先后 mix 时错配滚动）
+        self._pending_entry: dict = {"a": None, "b": None}
         for _letter in ("a", "b"):
             _t = QTimer(self)
             _t.setSingleShot(True)
@@ -220,9 +226,12 @@ class MainWindow(QMainWindow):
         lib_box.addWidget(self._lib_hint)
         body.addWidget(lib_panel)
 
-        # 双打碟机（含 E2 组件：Jog / Pad / 表演键；G3.5 导入上移顶层）
+        # 双打碟机（含 E2 组件：Jog / Pad / 表演键；G3.5 导入上移顶层；
+        # FIX005/P3-13：播放头色按盘注入——原双盘恒 deck_a 青）
         self.deck_widget_a = DeckWidget("DECK A")
+        self.deck_widget_a.waveform.set_playhead_key("deck_a")
         self.deck_widget_b = DeckWidget("DECK B")
+        self.deck_widget_b.waveform.set_playhead_key("deck_b")
         self.jog_a = JogWheel()
         self.jog_b = JogWheel()
         self.jog_a.set_shift_state(self._shift)
@@ -325,6 +334,16 @@ class MainWindow(QMainWindow):
         # PL001.13：空库显示引导句，有行即隐藏
         self._lib_hint.setVisible(self._table.rowCount() == 0)
 
+    def _refresh_lib_hint_style(self) -> None:
+        # FIX004.17：主题切换后引导句样式随 palette 重设
+        self._lib_hint.setStyleSheet(palette.silk_label_style("font-size: 12px; "))
+
+    def _on_theme_bus_changed(self, _name: str) -> None:
+        # 主题总线槽（FIX005.17：命名槽替代 lambda；关窗后广播早退）
+        if self._closing:
+            return
+        self._refresh_lib_hint_style()
+
     def _build_deck_panel(
         self, letter: str, name: str, wdg, jog, pad, slip, censor, stut
     ) -> QWidget:
@@ -346,7 +365,7 @@ class MainWindow(QMainWindow):
         tempo_col = QVBoxLayout()
         tempo_col.setSpacing(_SP_SM)
         tempo_col.addWidget(QLabel("TEMPO"), 0, Qt.AlignHCenter)
-        tempo = FaderSlider(-1.0, 1.0, 0.0, Qt.Vertical, length=s(120))
+        tempo = FaderSlider(-1.0, 1.0, 0.0, Qt.Vertical, length=120)  # FIX004.16 基准值（构造内缩放）
         tempo.setToolTip("TEMPO 实时变速（Keylock 开时经重渲染保持音高）")
         setattr(self, f"_tempo_{letter}", tempo)
         range_btn = GlowButton(f"±{self._tempo_range[letter]}%")
@@ -445,7 +464,7 @@ class MainWindow(QMainWindow):
         xf_col = QVBoxLayout()
         xf_col.setSpacing(_SP_SM)
         xf_col.addWidget(QLabel("横推"))
-        self._xfader = FaderSlider(-1.0, 1.0, 0.0, Qt.Horizontal, length=s(140))
+        self._xfader = FaderSlider(-1.0, 1.0, 0.0, Qt.Horizontal, length=140)  # FIX004.16
         self._bind_value_tip(
             self._xfader,
             lambda v: (
@@ -502,7 +521,7 @@ class MainWindow(QMainWindow):
         fx_row.setSpacing(_SP_SM)
         fx_row.addWidget(QLabel("FX 状态"))
         self._fx_status = MiniDisplay()
-        self._fx_status.setFixedSize(s(120), s(20))  # J4 缩放
+        self._fx_status.setFixedSize(s(120), s(20))  # FIX005.7：恢复缩放（构造内仅 minimum，setFixedSize 需显式 s()）
         fx_row.addWidget(self._fx_status, 1)
         box.addLayout(fx_row)
         # M2 推荐区（PL002.12）：推荐曲名小屏 + explanation + NEXT 单步 + AUTO 开关
@@ -644,6 +663,10 @@ class MainWindow(QMainWindow):
         # M2 推荐区接线（PL002.12）
         self._auto_next_btn.clicked.connect(self._on_recommend_and_prepare)
         self._auto_btn.toggled.connect(self._toggle_automix)
+        # FIX004.17：主题切换时引导句样式随 palette 重设（内联样式不随 QSS）；
+        # FIX005.17：lambda 改命名槽（lambda 强持有主窗且 closeEvent 不断连，
+        # 多窗/探针场景广播触碰已删对象）
+        palette.bus().changed.connect(self._on_theme_bus_changed)
         # 表演键（E2.8）
         self._slip_btns["a"].toggled.connect(self._engine.deck_a.slip_toggle)
         self._slip_btns["b"].toggled.connect(self._engine.deck_b.slip_toggle)
@@ -739,6 +762,19 @@ class MainWindow(QMainWindow):
             )
             self._table.setRowHidden(row, not visible)
 
+    @staticmethod
+    def _make_deck_meta(entry: dict) -> dict:
+        # 曲库条目 → 盘元数据（FIX004.2：Load/Instant Doubles/Mix 完成三入口
+        # 统一构造；含 energy/timbre 供 automix 评分）
+        return {
+            "path": entry["path"],
+            "bpm": entry.get("bpm", 0.0),
+            "key": entry.get("key", "?"),
+            "energy": entry.get("energy", 0),
+            "timbre": entry.get("timbre"),
+            "downbeats": list(entry.get("record", {}).get("downbeats", [])),
+        }
+
     def _load_track_to(self, letter: str, path: str, entry: dict) -> None:
         # 加载曲目到指定盘（解码+播放+波形+元数据；异常捕获不崩溃）
         try:
@@ -755,14 +791,8 @@ class MainWindow(QMainWindow):
         widget.waveform.set_grid(entry["record"].get("downbeats", []))  # PATCH001.3 下拍网格
         widget.set_playing_state(True)
         self._reset_tempo_ui(letter)  # J1.1：新曲重置 TEMPO/量程反显/Sync
-        self._deck_meta[letter] = {
-            "path": path,
-            "bpm": entry["bpm"],
-            "key": entry["key"],
-            "energy": entry.get("energy", 0),
-            "timbre": entry.get("timbre"),
-            "downbeats": list(entry["record"].get("downbeats", [])),
-        }
+        self._deck_meta[letter] = self._make_deck_meta(entry)  # FIX004.2 三入口统一
+        self._pending_entry[letter] = None  # 手动换曲仅清同盘 pending（FIX005.6）
         # PL002.11：手动装填退出自动模式（防双源打架）
         if self._automix.auto_mode:
             self._set_automix_ui(False, quiet=True)
@@ -817,12 +847,7 @@ class MainWindow(QMainWindow):
             other_widget.waveform.set_grid(entry["record"].get("downbeats", []))  # PATCH001.3
             other_widget.set_playing_state(True)
             self._reset_tempo_ui(other)  # J1.1：Instant Doubles 同样重置 TEMPO 域
-            self._deck_meta[other] = {
-                "path": path,
-                "bpm": entry["bpm"],
-                "key": entry["key"],
-                "downbeats": list(entry["record"].get("downbeats", [])),
-            }
+            self._deck_meta[other] = self._make_deck_meta(entry)  # FIX004.2 补 energy/timbre
             self._last_load = (None, 0.0)
             # PL002.11：手动装填退出自动模式
             if self._automix.auto_mode:
@@ -884,6 +909,9 @@ class MainWindow(QMainWindow):
         self._tempo_range[letter] = nxt
         btn = getattr(self, f"_tempo_range_btn_{letter}")
         btn.setText("WIDE" if nxt >= 100 else f"±{nxt}%")
+        # FIX004.18：Pitch 反显域随量程重建（±8 固定域在 ±16/WIDE 下饱和失真）
+        widget = getattr(self, f"deck_widget_{letter}")
+        widget.set_pitch_range(nxt)
         # 保持当前乐速：滑块位置重映射到新量程（blockSignals 防回环）
         deck = getattr(self._engine, f"deck_{letter}")
         tempo = getattr(self, f"_tempo_{letter}")
@@ -891,6 +919,9 @@ class MainWindow(QMainWindow):
         tempo.blockSignals(True)
         tempo.set_value(v)
         tempo.blockSignals(False)
+        # FIX005.5：量程切换后回写 Pitch 反显（set_pitch_range 内部清零滑块，
+        # 乐速非零时标签/帽位滞留旧值与实际乐速矛盾）
+        widget.set_pitch_display((deck.tempo_rate - 1.0) * 100.0)
         self._status(
             f"DECK {letter.upper()} TEMPO 量程 {'WIDE' if nxt >= 100 else f'±{nxt}%'}"
         )
@@ -936,12 +967,14 @@ class MainWindow(QMainWindow):
         )
 
     def _reset_tempo_ui(self, letter: str) -> None:
-        # 新曲加载后重置 TEMPO 滑块/Pitch 反显/Sync（引擎 play 已重置乐速域）
+        # 新曲加载后重置 TEMPO 滑块/Pitch 反显/Sync（引擎 play 已重置乐速域；
+        # FIX004.18：Pitch 域随当前量程重建——跨曲换量程后域保持正确）
         tempo = getattr(self, f"_tempo_{letter}")
         tempo.blockSignals(True)
         tempo.set_value(0.0)
         tempo.blockSignals(False)
         widget = getattr(self, f"deck_widget_{letter}")
+        widget.set_pitch_range(self._tempo_range[letter])
         widget.set_pitch_display(0.0)
         self._sync_on[letter] = False
         widget.set_sync_active(False)
@@ -990,7 +1023,7 @@ class MainWindow(QMainWindow):
             self._status("目标盘未播放，无法 Prepare")
             return
         now_deck = getattr(self._engine, f"deck_{self._target}")
-        self._tm.prepare(
+        ok = self._tm.prepare(
             now_deck,
             now_meta.get("bpm", 0.0),
             now_meta.get("downbeats", []),
@@ -1001,10 +1034,21 @@ class MainWindow(QMainWindow):
             fade_seconds=DEFAULT_FADE_SECONDS,
             on_done=self._on_prepared_done,
         )
-        self._status(f"预备中: {Path(entry['path']).name}")
+        # FIX005.6：仅在守卫通过（prepare 返回 True）后登记 pending——
+        # 原守卫判定前置位且不查返回值，拒绝时 pending 滞留
+        if ok:
+            self._pending_entry[self._target] = entry
+            self._status(f"预备中: {Path(entry['path']).name}")
+        else:
+            self._status(
+                "Prepare 被拒（当前盘需 PLAYING 且已知 BPM、无进行中预备）"
+            )
 
     def _on_prepared_done(self, plan, error) -> None:
-        # prepare 完成回调（worker 线程；经状态信号回主线程更新）
+        # prepare 完成回调（worker 线程；经状态信号回主线程更新）；
+        # FIX004/②-3：关窗防护（I3.6 同型——防 emit 已删 C++ 对象）
+        if getattr(self, "_closing", False):
+            return
         if error is not None:
             self.status_message.emit(f"Prepare 失败: {error}")
             return
@@ -1012,13 +1056,12 @@ class MainWindow(QMainWindow):
         self.status_message.emit(f"Prepare 完成（{skip}），可 Mix")
 
     def _on_mix(self) -> None:
-        # Mix Now：目标盘混入已预备缓冲（失败提示原因）；自动模式下链式
-        # prepare 下一曲（PL002.11）
+        # Mix Now：目标盘混入已预备缓冲（失败提示原因）；AUTO 链式装填改由
+        # _tick 的 mix 完成消费驱动（FIX004.3——原 mix_now 置 MIXING 后立即
+        # prepare 被 PLAYING 守卫恒拒且静默）
         now_deck = getattr(self._engine, f"deck_{self._target}")
         if self._tm.mix_now(now_deck):
             self._status("Mix 开始")
-            if self._automix.auto_mode:
-                self._automix.on_mix_started(now_deck)
         else:
             self._status("Mix 被拒：无预备缓冲或状态不允许")
 
@@ -1033,11 +1076,12 @@ class MainWindow(QMainWindow):
 
     def _on_bend_release(self, letter: str, v: float) -> None:
         # 弯音累积语义（P2 修复）：每格在 pending 上累加（同向滚动弯得更多，
-        # 反向抵消），钳制 ±0.5；重启单发定时器，超时后 jog_bend(0) 归零
+        # 反向抵消），钳制 ±JOG_BEND_MAX（FIX005/②-8 单源）；重启单发定时器，
+        # 超时后 jog_bend(0) 归零
         if abs(v) > 0.01:
             self._bend_pending[letter] = max(
-                -0.5, min(0.5, self._bend_pending[letter] + v)
-            )
+                -JOG_BEND_MAX, min(JOG_BEND_MAX, self._bend_pending[letter] + v)
+            )  # FIX004/②-8：单源 engine.JOG_BEND_MAX（原 0.5 字面量双源）
             getattr(self._engine, f"deck_{letter}").jog_bend(self._bend_pending[letter])
             self._bend_timers[letter].start()
 
@@ -1076,7 +1120,7 @@ class MainWindow(QMainWindow):
             elif deck.sample_state(idx)["loaded"]:
                 deck.sample_play(idx)
             else:
-                self._status(f"采样槽 {idx + 1} 未载入")
+                self._status(f"采样槽 {idx + 1} 未载入（暂无 UI 装填入口——M3 随电台录音装填）")
         elif mode == "Key Shift":
             # FLX4 语义：Pad1/8 均为复位键（0 半音）→ 未移调时两灯同亮为预期行为
             # （I2.2：slot_count 可配，半音表固定 8 项，越界槽位忽略）
@@ -1188,7 +1232,9 @@ class MainWindow(QMainWindow):
         self._rec_display.set_text(rec["entry"]["name"][:12])
         self._rec_label.setText(rec["explanation"])
         now_deck = getattr(self._engine, f"deck_{self._target}")
-        if self._automix.prepare_next(now_deck, on_done=self._on_prepared_done):
+        entry = self._automix.prepare_next(now_deck, on_done=self._on_prepared_done)
+        if entry is not None:
+            self._pending_entry[self._target] = entry  # FIX005.6 键控
             self._status(f"已推荐并预备: {rec['entry']['name']}（{rec['explanation']}）")
         else:
             self._status("推荐预备失败（当前盘需 PLAYING 且已知 BPM）")
@@ -1216,12 +1262,11 @@ class MainWindow(QMainWindow):
         # Ctrl+T：dark/light 循环切换（token 表 + QSS 重建；控件经 ThemeBus
         # 清缓存重绘；静态 LED 按新主题重涂）
         name = "light" if palette.current() == "dark" else "dark"
-        from ui.themes import switch_theme
-
         if not switch_theme(QApplication.instance(), name):
             self._status(f"未知主题：{name}")
             return
         self._apply_static_leds()
+        self._refresh_lib_hint_style()
         self._status(f"主题切换：{name}（Ctrl+T 循环）")
 
     def _apply_static_leds(self) -> None:
@@ -1321,14 +1366,42 @@ class MainWindow(QMainWindow):
                 pad.set_pad_light(6, deck.key_shift == -1)
                 pad.set_pad_light(7, deck.key_shift == 0)
             self._slip_btns[letter].setChecked(deck.slip_active)
+            # FIX004.3：mix 完成消费（UI 线程，替代原 mix_now 后立即链式的
+            # MIXING 守卫死锁）——meta 滚动到来曲 + AUTO 模式链式装填下一曲
+            if deck.take_mix_finished():  # FIX005.17：公开读即清（原私有直读直写）
+                pending = self._pending_entry[letter]
+                if pending is not None:
+                    finished_path = self._deck_meta[letter].get("path")  # 播完曲（滚动前捕获）
+                    self._deck_meta[letter] = self._make_deck_meta(pending)
+                    incoming = pending
+                    self._pending_entry[letter] = None
+                    # FIX005.10：混后引擎 BPM/下拍网格随新曲（原只滚 meta，
+                    # Beat FX 时基/beat_jump/网格全按旧曲）
+                    deck.set_tempo(incoming.get("bpm", 0.0))
+                    widget.waveform.set_grid(incoming.get("record", {}).get("downbeats", []))
+                    self._status(
+                        f"Mix 完成 → DECK {letter.upper()}: {Path(incoming['path']).name}"
+                    )
+                    if self._automix.auto_mode:
+                        nxt = self._automix.on_mix_started(deck, finished_path=finished_path)  # FIX005.1/.2
+                        if nxt is not None:
+                            self._pending_entry[letter] = nxt
+                            self._status(f"AUTO 链式预备: {Path(nxt['path']).name}")
+                        else:
+                            self._status("AUTO：无更多可用推荐（自动接歌停止）")
 
     # --- 其他 ---
 
     def _toggle_target(self) -> None:
-        # 切换目标盘 A/B（双击加载与转场作用对象）
+        # 切换目标盘 A/B（双击加载与转场作用对象）；AUTO 模式期间切盘即退出
+        # （FIX005/#20：now_meta_getter 以 _target late-bind，切盘会使 AUTO 链
+        # 基准错位）
         self._target = "b" if self._target == "a" else "a"
         self._target_btn.setText(f"目标盘: {self._target.upper()}")
         self._update_fx_status()  # J0.7：状态小屏联动
+        if self._automix.auto_mode:
+            self._set_automix_ui(False, quiet=True)
+            self._status("切换目标盘：AUTO 自动模式已退出")
         self._status(f"目标盘切换为 DECK {self._target.upper()}")
 
     def _open_folder(self) -> None:

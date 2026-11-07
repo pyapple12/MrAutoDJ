@@ -44,19 +44,32 @@ def _render_brushed(w: int, h: int) -> QPixmap:
 
 
 def texture(name: str, w: int, h: int) -> QPixmap:
-    # 取贴图：内存 → 磁盘 PNG → 现渲染并写盘（键含主题，dark/light 各一份）
-    key = f"{name}_{palette.current()}_{w}x{h}"
+    # 取贴图：内存 → 磁盘 PNG → 现渲染并写盘（键含主题，dark/light 各一份）；
+    # FIX004.14：尺寸量化 32px 步进（splitter 拖动逐像素变化不再逐像素 miss/
+    # 写盘——量化键复用，绘制按需拉伸）；缓存超 64 项全清（防无界增长）；
+    # FIX005.4：量化取**上整**（≥ 需求尺寸，原尺寸绘制即可覆盖全面板——
+    # 原向下取整在非 32 倍数尺寸右/下缘露透明空带）
+    qw = max(32, ((w + 31) // 32) * 32)
+    qh = max(32, ((h + 31) // 32) * 32)
+    # FIX005/P3-14：键附配色指纹（panel_base/edge 调色后旧 PNG 不失效）
+    csig = (
+        palette.color("panel_base", "#1c1e22").name()
+        + palette.color("panel_edge", "#26292f").name()
+    )[-12:]
+    key = f"{name}_{palette.current()}_{csig}_{qw}x{qh}"
     hit = _MEM.get(key)
     if hit is not None:
         return hit
+    if len(_MEM) > 64:
+        _MEM.clear()  # 简单防增长：全清后按需重建（贴图渲染廉价）
     path = _dir() / f"{key}.png"
     if path.is_file():
         pm = QPixmap(str(path))
     else:
         if name == "brushed":
-            pm = _render_brushed(w, h)
+            pm = _render_brushed(qw, qh)
         else:
-            pm = QPixmap(w, h)  # 未知名称：空贴图兜底
+            pm = QPixmap(qw, qh)  # 未知名称：空贴图兜底
         try:
             _dir().mkdir(parents=True, exist_ok=True)
             pm.save(str(path), "PNG")
