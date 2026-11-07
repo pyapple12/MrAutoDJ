@@ -190,6 +190,9 @@ __marimo__/
 # Mimosa 安全扫描工作目录（扫描历史落仓库外，本目录为缓存/中间产物）
 .mimosa/
 
+# 项目 skill 目录（本地工具，不入版本控制——FIX005 后定案）
+.agents/
+
 # 归档与临时
 archived/
 .temp/
