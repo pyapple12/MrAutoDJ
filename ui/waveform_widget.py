@@ -46,6 +46,9 @@ class WaveformWidget(ThemeAware, QWidget):
         self._duration: int = 0
         self._grid: list[int] = []  # 下拍样本位置（PATCH001.3：对拍网格）
         self._playhead_key = "deck_a"  # 播放头色 token 键（FIX005/P3-13：按盘注入）
+        # PATCH002.2 空态提示改由 DeckWidget 层的 QLabel 承担（原 paint 内
+        # drawText 中文在该位置触发 Qt access violation——FIX005 后二分定位，
+        # 放弃 paint 内画文本走 QLabel 标准路径）
         self.setMinimumHeight(56)
         self.bind_theme()  # J2
 
@@ -88,14 +91,18 @@ class WaveformWidget(ThemeAware, QWidget):
             painter.drawRect(0, 0, w - 1, h - 1)
             painter.end()
             return
-        # PATCH001.3：下拍网格（包络前绘制，accent 低对比——对拍可视化，
-        # 波形包络主导视觉）；样本位置按 _duration 比例映射
+        # PATCH001.3 + PATCH002.4：下拍网格（包络前绘制）——全程线 alpha 55
+        # + 顶部 6px 实色刻度（密集包络段靠顶部刻度辨认——回应已声明权衡）
         if self._grid and self._duration > 0:
-            painter.setPen(QPen(QColor(fg.red(), fg.green(), fg.blue(), 40), 1))
+            painter.setPen(QPen(QColor(fg.red(), fg.green(), fg.blue(), 55), 1))
             for d in self._grid:
                 if 0 <= d <= self._duration:
                     x = int(d / self._duration * (w - 1))
                     painter.drawLine(x, 0, x, h - 1)
+                    # PATCH002.4：顶部 6px 实色刻度（2px 宽）——密集包络段辨认锚点
+                    painter.setPen(QPen(fg, 2))
+                    painter.drawLine(x, 0, x, 6)
+                    painter.setPen(QPen(QColor(fg.red(), fg.green(), fg.blue(), 55), 1))
         # 峰值索引 → 像素列
         pen = QPen(fg, 1)
         painter.setPen(pen)

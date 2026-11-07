@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time as _time
 from pathlib import Path
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -210,19 +212,24 @@ class MainWindow(QMainWindow):
         self._table.setHorizontalHeaderLabels(self._table_headers)
         self._table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectRows)
-        self._table.horizontalHeader().setStretchLastSection(True)
+        # PATCH002.1：曲名列 Stretch 弹性（取代 stretchLastSection——能量列
+        # 定宽不再被表格宽重排），其余列 Interactive 定宽
+        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         # PATCH001.2：定宽四列（曲名走 stretchLastSection 弹性）——280px 最小
         # 库列下五列全部可见（原默认宽 100×5 裁掉调性/能量）
         for col, width in ((0, 40), (2, 60), (3, 64), (4, 48)):
             self._table.setColumnWidth(col, width)
-        lib_box.addWidget(self._table)
-        # PL001.13：空库引导句（empty keeps frame + 一句话；有行即隐藏）
-        self._lib_hint = QLabel("打开文件夹加载曲库 · 双击曲目加载到目标盘")
+        # PATCH002.1（方案修订）：空态引导句与表格互斥可见——原 QStackedWidget
+        # 方案改变库面板布局行为（表格超宽、列宽漂移）已回退；hint 沉底改居中
+        # 大字（AlignCenter + 14px），空态时表格隐藏、hint 独占面板居中
+        self._lib_hint = QLabel("打开文件夹加载曲库 · 双击曲目载入到目标盘")
         self._lib_hint.setAlignment(Qt.AlignCenter)
+        self._lib_hint.setWordWrap(True)
+        self._lib_hint.setMaximumWidth(272)  # PATCH002.1：限宽防长文本撑宽库面板
         self._lib_hint.setStyleSheet(
-            f"color: {palette.color('silk_text', '#8a9099').name()}; "
-            "font-size: 12px; background: transparent;"
+            palette.silk_label_style("font-size: 14px; ")
         )
+        lib_box.addWidget(self._table)
         lib_box.addWidget(self._lib_hint)
         body.addWidget(lib_panel)
 
@@ -331,8 +338,10 @@ class MainWindow(QMainWindow):
         )
 
     def _update_lib_hint(self) -> None:
-        # PL001.13：空库显示引导句，有行即隐藏
-        self._lib_hint.setVisible(self._table.rowCount() == 0)
+        # PL001.13 + PATCH002.1：空库显示居中引导句（表格隐藏），有数据反向
+        empty = self._table.rowCount() == 0
+        self._table.setVisible(not empty)
+        self._lib_hint.setVisible(empty)
 
     def _refresh_lib_hint_style(self) -> None:
         # FIX004.17：主题切换后引导句样式随 palette 重设
@@ -459,11 +468,10 @@ class MainWindow(QMainWindow):
             row3.addLayout(col)
         row3.addStretch(1)
         box.addLayout(row3)
-        # 行4：横推（水平）
+        # 行4：横推（水平；PATCH002.3：标签改同行——原独立一行致纵向 panel-void）
         row4 = QHBoxLayout()
-        xf_col = QVBoxLayout()
-        xf_col.setSpacing(_SP_SM)
-        xf_col.addWidget(QLabel("横推"))
+        row4.setSpacing(_SP_SM)
+        row4.addWidget(QLabel("横推"))
         self._xfader = FaderSlider(-1.0, 1.0, 0.0, Qt.Horizontal, length=140)  # FIX004.16
         self._bind_value_tip(
             self._xfader,
@@ -471,8 +479,7 @@ class MainWindow(QMainWindow):
                 f"横推 L {int((1 - (v + 1) / 2) * 100)}% / R {int((v + 1) / 2 * 100)}%"
             ),
         )
-        xf_col.addWidget(self._xfader)
-        row4.addLayout(xf_col, 1)
+        row4.addWidget(self._xfader, 1)
         box.addLayout(row4)
         # 行5：耳机监听区（J1.0 启用：CUE A/B 独占预听 + 音量；平衡预留双源混音）
         row5 = QHBoxLayout()

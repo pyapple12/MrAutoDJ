@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui import palette
 from ui.waveform_widget import WaveformWidget
 from ui.widgets.fader_slider import FaderSlider
 from ui.widgets.glow_button import GlowButton
@@ -50,6 +51,15 @@ class DeckWidget(QWidget):
         self._progress_label = QLabel("0:00 / 0:00")
 
         self.waveform = WaveformWidget()
+        # PATCH002.2：空态提示行（波形下方 QLabel——paint 内 drawText 触发
+        # Qt AV 已二分定位故改标签路径；未加载显示、载入后隐藏）
+        self._wave_hint = QLabel("从曲库双击载入曲目")
+        self._wave_hint.setAlignment(Qt.AlignCenter)
+        self._wave_hint.setStyleSheet(
+            palette.silk_label_style("font-size: 11px; ")
+        )
+        # 未加载默认显示（PATCH002.2：set_track 载入后隐藏）
+        self._wave_hint.setVisible(True)
 
         self._play_btn = GlowButton("播放")
         self._cue_btn = GlowButton("CUE")
@@ -109,6 +119,7 @@ class DeckWidget(QWidget):
         layout.setSpacing(4)
         layout.addWidget(self._info_label)
         layout.addWidget(self.waveform, 1)
+        layout.addWidget(self._wave_hint)
         layout.addWidget(self._progress_label)
         layout.addLayout(controls)
         layout.addLayout(loop_row)
@@ -133,11 +144,12 @@ class DeckWidget(QWidget):
     def set_track(
         self, path: str, bpm: float, key: str, audio: np.ndarray | None
     ) -> None:
-        # 载入曲目：更新信息标签与波形（G3.5：Path 顶层导入）
+        # 载入曲目：更新信息标签与波形（G3.5：Path 顶层导入）；空态提示行隐藏
         name = Path(path).name if path else "未加载"
         bpm_str = f"{bpm:.1f}" if bpm and bpm > 0 else "---"
         self._info_label.setText(f"{self.deck_name}: {name}  |  {bpm_str} BPM  {key}")
         self.waveform.set_audio(audio)
+        self._wave_hint.setVisible(False)  # PATCH002.2：有曲即隐藏
 
     def update_progress(self, position: int, duration: int) -> None:
         # 刷新进度文本与波形播放头（100ms 定时器；H0.6：采样率配置驱动）

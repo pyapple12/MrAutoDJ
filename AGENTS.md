@@ -30,7 +30,7 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 - `main.py` 收编 GUI 分发；模块间顶层 import，不要使用函数内延迟 import（librosa 等重依赖除外，可在函数内导入）
 - 提交信息按 Git 注意章节的 Commit 提交规范书写（四段式版本，如 `feat: V0.2.6.1，摘要...`）
 - 项目规划与方案文档在 `z.plan.md`，源码研读报告在 `w.study.md`，任务清单在 `x.progress.md`
-- `.agents/skills/` 为项目 skill 目录（**不入版本控制**，2026-11-06 定案；本地保留 audit-project / audit-report / progress-task / opencode-skill-creator）；skill 只描述能力与流程，规范权威源在 AGENTS.md
+- `.agents/skills/` 为项目 skill 目录（**不入版本控制**，2026-11-06 定案；本地八件：自建 audit-project / audit-report / progress-task + 工具 opencode-skill-creator + 引入 taste-skill / qa-review / diagram-design / collection-curator——源 F:\Collection）；skill 只描述能力与流程，规范权威源在 AGENTS.md
 - `.reference/` 目录是外部项目的 git clone（浅克隆），**不纳入本仓库版本控制**；需要更新时重新 clone
 
 ## 任务清单纪律（x.progress.md，2026-11-05 定案，对齐 CapsulePulse）

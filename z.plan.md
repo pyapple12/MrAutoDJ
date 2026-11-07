@@ -884,3 +884,21 @@ _mix_source_chunk 推进-消费恒等零漂移（同式同 frames）；beat_fram
 ### 三、亮点
 
 三路回归复核确认 FIX004 主体修复真实有效（引擎级断言扎实）；base.json/ui.json 全键矩阵核对终态**零死键零缺键**；audio_decode 五档实测行为全对；ui 组"业务 LED+checked 全按钮无降档漏网"、letter 闭包全对、ThemeBus 无泄漏；config 组发现 requirements 缺 audioop-lts 的**环境可复现性 P1**（冒烟门禁盲区的实证）。
+
+---
+
+## 附录 PATCH002：UI 打磨收口（曲库空态构图 / B 盘空态 / Mixer 密度 / 波形网格可见度）
+
+> 立项：2026-11-06（第三轮 UI 评审验证轮——上轮 Top3 全部闭环、overall 6.0→7.4，剩余四项打磨级一次收口）。
+> 状态：✅ **已实施**（2026-11-07，PATCH002 5/5 勾结，见 x.progress.md；probe_patch002 全 PASS + 27/27 回归 + 冒烟 + 截图读图。执行中一处方案回退：QStackedWidget 改互斥可见（库面板布局行为回归）；一处二分发现：waveform paint 内 drawText 中文触发 Qt AV 已改 QLabel 路径。提交 V0.2.7.5 由用户执行）
+
+### 措施（文件/函数级）
+
+1. **曲库空态构图**——`main_window.py _build_ui()`：曲库改 QStackedWidget 两页（页 0=表格 / 页 1=居中引导句 14px）；`_update_lib_hint` 改切页（原引导句沉底且字号 12）
+2. **B 盘空态提示**——`waveform_widget.py`：新增 `set_empty_hint(text)` + `paintEvent` 空数据分支（n_peaks<2）在中央绘制 silk 12px 提示（保留边框——"empty keeps frame + 一句话"）；`deck_widget.py set_track` 有曲时清提示；B 盘未加载默认显示"从曲库双击载入曲目"
+3. **Mixer 密度**——`main_window._build_mixer_panel()`：横推标签改与横推条同行（原独立一行致 panel-void 边缘）
+4. **波形网格可见度**——`waveform_widget.paintEvent()`：下拍线全程 alpha 40→55 + 顶部 6px 实色刻度（密集包络段靠顶部刻度辨认——回应已声明权衡）
+
+### 验证
+
+- `.temp/probe_patch002.py`：空库切页断言 / B 盘提示存储断言 / 横推同行几何断言 / 网格绘制断言 + 双主题 grab 不崩；全量回归 + 截图
