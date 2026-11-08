@@ -206,3 +206,6 @@ config/user_config.json
 
 # 缓存（分析库 / UI 贴图）
 .cache/
+
+# taste-skill 评审工件（截图/报告，本地工作产物）
+.taste-skill/

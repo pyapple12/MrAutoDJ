@@ -4,6 +4,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { EngineApi, LibEntry } from '../composables/useEngine'
+import MetalPanel from './skeuo/MetalPanel.vue'
+import BacklitButton from './skeuo/BacklitButton.vue'
+import MiniDisplay from './skeuo/MiniDisplay.vue'
 
 const props = defineProps<{ engine: EngineApi }>()
 
@@ -122,15 +125,15 @@ const fmtProgress = computed(() => {
 </script>
 
 <template>
-  <section class="library">
+  <MetalPanel title="曲库">
+    <div class="library">
     <header class="head">
-      <h3>曲库</h3>
       <input v-model="folder" class="folder" type="text" placeholder="曲库目录（如 E:\\music）" @keyup.enter="scan" />
-      <button class="primary" :disabled="scanning" @click="pickFolder">
+      <BacklitButton size="sm" led="accent" :disabled="scanning" @click="pickFolder">
         {{ isTauri ? '选择目录' : '扫描' }}
-      </button>
+      </BacklitButton>
       <input v-model="filter" class="search" type="text" placeholder="搜索（名称/调性）" />
-      <span class="prog">{{ fmtProgress }}</span>
+      <MiniDisplay :text="fmtProgress || 'READY'" :warn="engine.state.analyzing" />
     </header>
     <div
       class="table"
@@ -163,7 +166,8 @@ const fmtProgress = computed(() => {
       </div>
     </div>
     <p v-if="err" class="err">{{ err }}</p>
-  </section>
+    </div>
+  </MetalPanel>
 </template>
 
 <style scoped>
@@ -194,7 +198,7 @@ const fmtProgress = computed(() => {
   flex: 1;
 }
 .prog {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--accent2);
   white-space: nowrap;
 }
@@ -208,7 +212,7 @@ const fmtProgress = computed(() => {
   display: flex;
   gap: 8px;
   padding: 4px 10px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--fg-dim);
   border-bottom: 1px solid var(--line);
   position: sticky;
@@ -272,7 +276,7 @@ const fmtProgress = computed(() => {
 }
 .err {
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
   color: #ff6b6b;
 }
 </style>

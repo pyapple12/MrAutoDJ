@@ -1,10 +1,14 @@
-<!-- Mixer 区（PL004.3）：TRIM/EQ 旋钮（拖拽+双击回中）、VU 灯柱（tick 驱动）、
-     主音量/横推、FaderStart/Tap、PHONES 预听独占切换 -->
+<!-- Mixer 区（PL006.2 拟物化）：skeuo Knob（TRIM/EQ）+ VuMeter 辉光灯柱 +
+     skeuo Fader（横推）+ MiniDisplay 小屏 + BacklitButton；主音量旋钮；
+     PHONES 预听独占切换；交互语义对齐（拖拽+双击回中+数值提示） -->
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { EngineApi } from '../composables/useEngine'
-import RotaryKnob from './RotaryKnob.vue'
-import VuMeter from './VuMeter.vue'
+import MetalPanel from './skeuo/MetalPanel.vue'
+import BacklitButton from './skeuo/BacklitButton.vue'
+import Knob from './skeuo/Knob.vue'
+import Fader from './skeuo/Fader.vue'
+import VuMeter from './skeuo/VuMeter.vue'
 
 const props = defineProps<{ engine: EngineApi }>()
 
@@ -14,7 +18,6 @@ const xfaderPos = ref(0.0)
 const faderStart = ref(false)
 const phonesVol = ref(1.0)
 
-// 每盘旋钮本地值（发起指令后由引擎生效；旋钮值即指令参数）
 const trim = ref<Record<'a' | 'b', number>>({ a: 1.0, b: 1.0 })
 const eq = ref<Record<'a' | 'b', Record<'low' | 'mid' | 'high', number>>>({
   a: { low: 0, mid: 0, high: 0 },
@@ -39,142 +42,154 @@ const toggleFaderStart = () => run(() => props.engine.rpc('fader_start', { on: f
 const tap = (d: 'a' | 'b') => run(() => props.engine.rpc('tap', { deck: d }))
 const preview = (d: 'a' | 'b') => run(() => props.engine.rpc('phones_preview', { deck: d }))
 const setPhonesVol = () => run(() => props.engine.rpc('set_phones_volume', { volume: phonesVol.value }))
+
+const xfaderLabel = computed(() => {
+  // 横推位置读数（-1=A 全出 / 0=居中 / 1=B 全出）
+  const v = xfaderPos.value
+  if (v < -0.02) return `A ${Math.abs(v).toFixed(2)}`
+  if (v > 0.02) return `B ${v.toFixed(2)}`
+  return '居中'
+})
 </script>
 
 <template>
-  <section class="mixer">
-    <div class="ch">
-      <div class="knobs">
-        <RotaryKnob v-model="trim.a" :min="0" :max="2" :default-value="1" label="TRIM A" @update:model-value="setTrim('a')" />
-        <RotaryKnob v-model="eq.a.low" :min="-1" :max="1" label="低" @update:model-value="setEq('a', 'low')" />
-        <RotaryKnob v-model="eq.a.mid" :min="-1" :max="1" label="中" @update:model-value="setEq('a', 'mid')" />
-        <RotaryKnob v-model="eq.a.high" :min="-1" :max="1" label="高" @update:model-value="setEq('a', 'high')" />
+  <MetalPanel title="MIXER">
+    <div class="mixer">
+      <div class="ch">
+        <div class="knobs">
+          <Knob v-model="trim.a" :min="0" :max="2" :default-value="1" label="TRIM A" @update:model-value="setTrim('a')" />
+          <Knob v-model="eq.a.low" :min="-1" :max="1" label="低" @update:model-value="setEq('a', 'low')" />
+          <Knob v-model="eq.a.mid" :min="-1" :max="1" label="中" @update:model-value="setEq('a', 'mid')" />
+          <Knob v-model="eq.a.high" :min="-1" :max="1" label="高" @update:model-value="setEq('a', 'high')" />
+        </div>
+        <VuMeter :vu="engine.state.a.vu" />
+        <BacklitButton size="sm" @click="tap('a')">TAP A</BacklitButton>
       </div>
-      <VuMeter :vu="engine.state.a.vu" />
-      <button class="tap" @click="tap('a')">TAP A</button>
-    </div>
 
-    <div class="center">
-      <button
-        class="fs"
-        :class="{ on: faderStart }"
-        title="Fader Start：横推向对侧时自动播放/暂停"
-        @click="faderStart = !faderStart; toggleFaderStart()"
-      >
-        FS
-      </button>
-      <div class="xfader-row">
-        <span class="lab">A</span>
-        <input v-model.number="xfaderPos" type="range" min="-1" max="1" step="0.01" @change="setXfader" />
-        <span class="lab">B</span>
-      </div>
-      <div class="master-row">
-        <span class="lab">主音量</span>
-        <input v-model.number="masterVol" type="range" min="0" max="2" step="0.01" @change="setMaster" />
-        <span class="val">{{ masterVol.toFixed(2) }}</span>
-      </div>
-      <div class="phones">
-        <button
-          v-for="d in ['a', 'b'] as const"
-          :key="d"
-          class="cue-btn"
-          :class="{ on: engine.state.cue_active === d }"
-          @click="preview(d)"
+      <div class="center">
+        <BacklitButton
+          size="sm"
+          :led="faderStart ? 'accent' : null"
+          title="Fader Start：横推向对侧时自动播放/暂停"
+          @click="faderStart = !faderStart; toggleFaderStart()"
         >
-          CUE {{ d.toUpperCase() }}
-        </button>
-        <span class="lab">音量</span>
-        <input v-model.number="phonesVol" type="range" min="0" max="1" step="0.01" @change="setPhonesVol" />
+          FS
+        </BacklitButton>
+        <div class="xfader-row">
+          <span class="lab">A</span>
+          <Fader v-model="xfaderPos" :min="-1" :max="1" @update:model-value="setXfader" />
+          <span class="lab">B</span>
+          <span class="val">{{ xfaderLabel }}</span>
+        </div>
+        <div class="master-row">
+          <span class="lab">主音量</span>
+          <Knob
+            v-model="masterVol"
+            :min="0"
+            :max="2"
+            :default-value="1"
+            :size="40"
+            label="主"
+            :format="(v) => v.toFixed(2)"
+            @update:model-value="setMaster"
+          />
+        </div>
+        <div class="phones">
+          <BacklitButton
+            v-for="d in ['a', 'b'] as const"
+            :key="d"
+            size="sm"
+            :led="engine.state.cue_active === d ? 'glow-green' : null"
+            @click="preview(d)"
+          >
+            CUE {{ d.toUpperCase() }}
+          </BacklitButton>
+          <span class="lab">音量</span>
+          <Knob
+            v-model="phonesVol"
+            :min="0"
+            :max="1"
+            :default-value="1"
+            :size="32"
+            label="监听"
+            :format="(v) => v.toFixed(2)"
+            @update:model-value="setPhonesVol"
+          />
+        </div>
       </div>
-    </div>
 
-    <div class="ch">
-      <div class="knobs">
-        <RotaryKnob v-model="trim.b" :min="0" :max="2" :default-value="1" label="TRIM B" @update:model-value="setTrim('b')" />
-        <RotaryKnob v-model="eq.b.low" :min="-1" :max="1" label="低" @update:model-value="setEq('b', 'low')" />
-        <RotaryKnob v-model="eq.b.mid" :min="-1" :max="1" label="中" @update:model-value="setEq('b', 'mid')" />
-        <RotaryKnob v-model="eq.b.high" :min="-1" :max="1" label="高" @update:model-value="setEq('b', 'high')" />
+      <div class="ch">
+        <div class="knobs">
+          <Knob v-model="trim.b" :min="0" :max="2" :default-value="1" label="TRIM B" @update:model-value="setTrim('b')" />
+          <Knob v-model="eq.b.low" :min="-1" :max="1" label="低" @update:model-value="setEq('b', 'low')" />
+          <Knob v-model="eq.b.mid" :min="-1" :max="1" label="中" @update:model-value="setEq('b', 'mid')" />
+          <Knob v-model="eq.b.high" :min="-1" :max="1" label="高" @update:model-value="setEq('b', 'high')" />
+        </div>
+        <VuMeter :vu="engine.state.b.vu" />
+        <BacklitButton size="sm" @click="tap('b')">TAP B</BacklitButton>
       </div>
-      <VuMeter :vu="engine.state.b.vu" />
-      <button class="tap" @click="tap('b')">TAP B</button>
-    </div>
 
-    <p v-if="err" class="err">{{ err }}</p>
-  </section>
+      <p v-if="err" class="err">{{ err }}</p>
+    </div>
+  </MetalPanel>
 </template>
 
 <style scoped>
 .mixer {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  gap: 14px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 12px 16px;
+  gap: var(--sp-3);
   position: relative;
+}
+/* 手机/平板宽度：单列纵向（A / 中控 / B） */
+@media (max-width: 900px) {
+  .mixer {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .ch {
   display: flex;
-  gap: 10px;
+  gap: var(--sp-2);
   align-items: center;
   justify-content: center;
 }
 .knobs {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 .center {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: stretch;
-  min-width: 260px;
+  min-width: 280px;
 }
 .xfader-row,
 .master-row,
 .phones {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
 }
-.xfader-row input,
-.master-row input,
-.phones input {
-  flex: 1;
-  accent-color: var(--accent);
+.master-row {
+  justify-content: center;
 }
 .lab,
 .val {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--fg-dim);
   white-space: nowrap;
 }
 .val {
   font-variant-numeric: tabular-nums;
-}
-button.fs,
-button.tap,
-button.cue-btn {
-  padding: 4px 12px;
-  font-size: 11px;
-}
-button.fs.on,
-button.cue-btn.on {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #0b0e14;
-}
-button.cue-btn.on {
-  background: #2fe37a;
-  border-color: #2fe37a;
+  color: var(--glow-blue);
 }
 .err {
   position: absolute;
   bottom: 4px;
   right: 10px;
   margin: 0;
-  font-size: 11px;
-  color: #ff6b6b;
+  font-size: 12px;
+  color: var(--danger);
 }
 </style>

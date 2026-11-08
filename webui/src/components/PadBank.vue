@@ -98,7 +98,7 @@ async function hit(idx: number, ev: PointerEvent | MouseEvent) {
 }
 .mode-btn {
   padding: 4px 10px;
-  font-size: 11px;
+  font-size: 12px;
   border-radius: 4px;
 }
 .mode-btn.on {
@@ -125,7 +125,7 @@ async function hit(idx: number, ev: PointerEvent | MouseEvent) {
 }
 .err {
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
   color: #ff6b6b;
 }
 </style>

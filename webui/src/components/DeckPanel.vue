@@ -4,7 +4,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { DeckState, EngineApi } from '../composables/useEngine'
-import JogWheel from './JogWheel.vue'
+import MetalPanel from './skeuo/MetalPanel.vue'
+import BacklitButton from './skeuo/BacklitButton.vue'
+import Fader from './skeuo/Fader.vue'
+import JogWheel from './skeuo/JogWheel.vue'
 import PadBank from './PadBank.vue'
 import WaveformView from './WaveformView.vue'
 
@@ -80,14 +83,15 @@ const doCue = () => run(() => props.engine.rpc('cue', { deck: props.letter }))
 const doSeek = (ev: Event) =>
   run(() => props.engine.rpc('seek', { deck: props.letter, seconds: Number((ev.target as HTMLInputElement).value) }))
 
-// TEMPO：推子值→倍率（Keylock/变速语义由引擎处理）；手动推子解除 Sync（协议 D1）
-const onTempo = () =>
-  run(async () => {
-    syncFromTick.value = true
-    const rate = 1.0 + tempoV.value * (range.value / 100)
-    await props.engine.rpc('set_tempo_rate', { deck: props.letter, rate })
-    window.setTimeout(() => (syncFromTick.value = false), 300)
-  })
+// TEMPO 推子（skeuo Fader）：拖拽实时更新 tempoV → 发乐速倍率；手动解除 Sync（协议 D1）
+watch(
+  tempoV,
+  (v) => {
+    if (syncFromTick.value) return
+    const rate = 1.0 + v * (range.value / 100)
+    void props.engine.rpc('set_tempo_rate', { deck: props.letter, rate })
+  },
+)
 const cycleRange = () => run(() => props.engine.rpc('cycle_tempo_range', { deck: props.letter }))
 
 // Keylock / Key Shift / Sync
@@ -132,53 +136,66 @@ const stateText = computed(() =>
 </script>
 
 <template>
-  <section
+  <MetalPanel
     class="deck-panel"
     :class="{ target: engine.state.target === letter }"
+    :title="`DECK ${letter.toUpperCase()}`"
     @dragover.prevent
     @drop="onDrop"
   >
     <header class="deck-head">
-      <h2>DECK {{ letter.toUpperCase() }}</h2>
       <span class="badge" :class="deck.state">{{ stateText }}</span>
-      <span v-if="engine.state.target === letter" class="target-mark">目标</span>
-      <button class="mini" title="复制当前曲目到另一盘同位置（Instant Doubles）" @click="instantDoubles">
+      <span v-if="engine.state.target === letter" class="target-mark">目标盘</span>
+      <BacklitButton size="sm" title="复制当前曲目到另一盘同位置（Instant Doubles）" @click="instantDoubles">
         ⧉ Doubles
-      </button>
-      <button class="mini" title="设为目标盘（mix/prepare 的 now 盘）" @click="engine.rpc('set_target', { deck: letter })">
+      </BacklitButton>
+      <BacklitButton
+        size="sm"
+        :led="engine.state.target === letter ? 'accent2' : null"
+        title="设为目标盘（mix/prepare 的 now 盘）"
+        @click="engine.rpc('set_target', { deck: letter })"
+      >
         设目标
-      </button>
+      </BacklitButton>
     </header>
 
     <div class="load-row">
       <input v-model="pathInput" type="text" placeholder="音频文件路径（如 E:\\music\\song.mp3）" :disabled="busy" />
-      <button class="primary" :disabled="busy" @click="loadTrack">载入</button>
+      <BacklitButton :led="null" :disabled="busy" @click="loadTrack">
+        {{ busy ? '载入中…' : '载入' }}
+      </BacklitButton>
     </div>
 
     <div class="jog-tempo">
       <JogWheel :letter="letter" :engine="engine" />
       <div class="tempo-col">
         <div class="tempo-head">
-          <button class="mini range" @click="cycleRange">{{ rangeLabel }}</button>
+          <BacklitButton size="sm" led="accent2" @click="cycleRange">{{ rangeLabel }}</BacklitButton>
           <span class="pitch">{{ `Pitch ${pitchPct >= 0 ? '+' : ''}${pitchPct.toFixed(1)}%` }}</span>
         </div>
-        <input v-model.number="tempoV" class="tempo" type="range" min="-1" max="1" step="0.001" @input="onTempo" />
+        <Fader v-model="tempoV" :min="-1" :max="1" />
         <div class="keys-row">
-          <button class="mini" :class="{ on: deck.keylock }" @click="toggleKeylock">KEYLOCK</button>
-          <button class="mini" title="移调 -1" @click="shiftSemi(-1)">KEY−</button>
-          <button class="mini" title="复位移调" @click="shiftSemi(0)">KEY0</button>
-          <button class="mini" title="移调 +1" @click="shiftSemi(1)">KEY+</button>
+          <BacklitButton size="sm" :led="deck.keylock ? 'accent' : null" @click="toggleKeylock">KEYLOCK</BacklitButton>
+          <BacklitButton size="sm" title="移调 -1" @click="shiftSemi(-1)">KEY−</BacklitButton>
+          <BacklitButton size="sm" title="复位移调" @click="shiftSemi(0)">KEY0</BacklitButton>
+          <BacklitButton size="sm" title="移调 +1" @click="shiftSemi(1)">KEY+</BacklitButton>
           <span class="ks">{{ deck.key_shift > 0 ? `+${deck.key_shift}` : deck.key_shift }}</span>
         </div>
-        <button class="mini sync" :class="{ on: engine.state.sync[letter] }" @click="toggleSync">SYNC</button>
+        <BacklitButton size="sm" :led="engine.state.sync[letter] ? 'glow-blue' : null" @click="toggleSync">
+          SYNC
+        </BacklitButton>
       </div>
     </div>
 
     <div class="transport-row">
-      <button class="primary play" :class="{ active: deck.state === 'playing' }" :disabled="busy" @click="togglePlay">
+      <BacklitButton
+        :led="deck.state === 'playing' || deck.state === 'mixing' ? 'accent2' : null"
+        :disabled="busy"
+        @click="togglePlay"
+      >
         {{ deck.paused ? '播放' : '暂停' }}
-      </button>
-      <button :disabled="busy" @click="doCue">CUE</button>
+      </BacklitButton>
+      <BacklitButton :disabled="busy" @click="doCue">CUE</BacklitButton>
       <span class="bpm">{{ deck.bpm > 0 ? deck.bpm.toFixed(1) + ' BPM' : '--- BPM' }}</span>
       <span class="eff" v-if="deck.bpm > 0 && deck.tempo_rate !== 1">→ {{ (deck.bpm * deck.tempo_rate).toFixed(1) }}</span>
     </div>
@@ -201,53 +218,51 @@ const stateText = computed(() =>
     </div>
 
     <div class="loop-row">
-      <button class="mini" :class="{ on: deck.loop }" @click="toggleLoop">循环</button>
-      <button class="mini" title="循环入点" @click="loopAction('in')">IN</button>
-      <button class="mini" title="循环出点并激活" @click="loopAction('out')">OUT</button>
-      <button class="mini" title="从当前位置起 4 拍循环" @click="beatloop4">4BEAT</button>
-      <button class="mini" title="循环减半" @click="loopAction('halve')">◀</button>
-      <button class="mini" title="循环加倍" @click="loopAction('double')">▶</button>
+      <BacklitButton size="sm" :led="deck.loop ? 'accent' : null" @click="toggleLoop">循环</BacklitButton>
+      <BacklitButton size="sm" title="循环入点" @click="loopAction('in')">IN</BacklitButton>
+      <BacklitButton size="sm" title="循环出点并激活" @click="loopAction('out')">OUT</BacklitButton>
+      <BacklitButton size="sm" title="从当前位置起 4 拍循环" @click="beatloop4">4BEAT</BacklitButton>
+      <BacklitButton size="sm" title="循环减半" @click="loopAction('halve')">◀</BacklitButton>
+      <BacklitButton size="sm" title="循环加倍" @click="loopAction('double')">▶</BacklitButton>
     </div>
 
     <div class="perf-row">
-      <button class="mini" :class="{ on: deck.slip }" title="滑行：表演后松手落回真实位置" @click="toggleSlip">SLIP</button>
-      <button class="mini" :class="{ on: censorOn }" title="消音" @click="toggleCensorOn">CENSOR</button>
-      <button class="mini" title="结巴重复" @click="stutter">STUTTER</button>
+      <BacklitButton size="sm" :led="deck.slip ? 'accent' : null" title="滑行：表演后松手落回真实位置" @click="toggleSlip">
+        SLIP
+      </BacklitButton>
+      <BacklitButton size="sm" :led="censorOn ? 'var(--danger)' : null" title="消音" @click="toggleCensorOn">
+        CENSOR
+      </BacklitButton>
+      <BacklitButton size="sm" title="结巴重复" @click="stutter">STUTTER</BacklitButton>
     </div>
 
     <PadBank :letter="letter" :engine="engine" />
 
     <p v-if="errMsg" class="err">{{ errMsg }}</p>
-  </section>
+  </MetalPanel>
 </template>
 
 <style scoped>
 .deck-panel {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 14px 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   min-width: 0; /* grid 1fr 子项防 min-content 撑爆列宽 */
 }
+/* 目标盘：橙色描边高亮（覆盖 MetalPanel 边框） */
 .deck-panel.target {
   border-color: var(--accent2);
+  box-shadow:
+    0 0 0 1px var(--accent2),
+    0 2px 10px -2px color-mix(in srgb, var(--accent2) 45%, transparent);
 }
 .deck-head {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.deck-head h2 {
-  margin: 0;
-  font-size: 15px;
-  letter-spacing: 2px;
-  color: var(--fg-dim);
-}
 .badge {
-  font-size: 11px;
+  font-size: 12px;
   padding: 2px 10px;
   border-radius: 99px;
   border: 1px solid var(--line);
@@ -262,12 +277,12 @@ const stateText = computed(() =>
   border-color: var(--accent2);
 }
 .target-mark {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--accent2);
 }
 .mini {
   padding: 3px 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .mini.on {
   background: var(--accent);
@@ -368,7 +383,7 @@ input[type='range'].seek {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--fg-dim);
 }
 .vu-track {

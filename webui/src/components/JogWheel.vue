@@ -221,7 +221,7 @@ button.vinyl.on {
   color: var(--accent);
 }
 .hint {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--fg-dim);
 }
 </style>

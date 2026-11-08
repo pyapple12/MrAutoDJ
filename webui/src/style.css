@@ -1,13 +1,10 @@
-/* 全局样式（PL003.6 hello-DJ 一屏）：深色基调配 CSS 变量 tokens（PL006 再对齐 ui.json 双主题） */
-:root {
-  --bg: #0b0e14;
-  --panel: #12161f;
-  --line: #232a38;
-  --fg: #dde3ee;
-  --fg-dim: #7a8499;
-  --accent: #2f8bff;
-  --accent2: #ff7a2f;
+/* 全局样式（PL006.1 token 单源化）：颜色/间距/尺寸全部引用 tokens.css 变量
+   （tools/gen_webui_tokens.py 从 ui.json 生成，勿手写色值）；
+   本文件只承担元素基样式与主题切换过渡 */
 
+@import './styles/tokens.css';
+
+:root {
   font-family: system-ui, 'Segoe UI', 'Microsoft YaHei', sans-serif;
   color: var(--fg);
   background: var(--bg);
@@ -16,8 +13,25 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* 主题切换平滑过渡（ThemeBus 语义——全控件刷新无重启的 Web 等价） */
+body,
+body * {
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
 * {
   box-sizing: border-box;
+}
+
+/* 控件字体继承（防浏览器默认 Arial 混入——font-count 单族纪律） */
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }
 
 body {
@@ -27,7 +41,7 @@ body {
 }
 
 input[type='text'] {
-  background: var(--bg);
+  background: var(--panel-inset);
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--fg);
@@ -36,7 +50,7 @@ input[type='text'] {
 }
 input[type='text']:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--glow-blue);
 }
 
 button {
@@ -49,13 +63,13 @@ button {
   cursor: pointer;
 }
 button:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--glow-blue);
 }
 button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 button.primary {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--glow-blue);
+  color: var(--glow-blue);
 }

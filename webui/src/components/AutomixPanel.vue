@@ -4,6 +4,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { EngineApi } from '../composables/useEngine'
+import MetalPanel from './skeuo/MetalPanel.vue'
+import BacklitButton from './skeuo/BacklitButton.vue'
+import MiniDisplay from './skeuo/MiniDisplay.vue'
 
 const props = defineProps<{ engine: EngineApi }>()
 
@@ -48,17 +51,18 @@ const mixNow = () =>
 </script>
 
 <template>
-  <section class="recpanel">
+  <MetalPanel class="automix-panel" title="推荐 / AUTO">
+    <div class="recpanel">
     <header class="head">
-      <h3>推荐 / AUTO</h3>
-      <button class="next" @click="recommend">NEXT</button>
-      <button class="mini" :disabled="mixing" title="立即触发转场（当前目标盘 → 预备曲）" @click="mixNow">MIX</button>
-      <button class="auto" :class="{ on: autoOn }" @click="toggleAuto">AUTO</button>
+      <MiniDisplay :text="recName" :warn="recName === '--'" />
+      <BacklitButton size="sm" led="accent" @click="recommend">NEXT</BacklitButton>
+      <BacklitButton size="sm" :disabled="mixing" title="立即触发转场（当前目标盘 → 预备曲）" @click="mixNow">MIX</BacklitButton>
+      <BacklitButton size="sm" :led="autoOn ? 'accent' : null" @click="toggleAuto">AUTO</BacklitButton>
     </header>
     <div class="body">
-      <span class="name">{{ recName }}</span>
       <span class="why">{{ recWhy }}</span>
     </div>
+    <p class="usage">NEXT 推荐并预备到对侧盘 · MIX 立即触发转场 · AUTO 开启后 Mix 完成自动接歌</p>
     <p v-if="preparedText" class="prepared" :class="{ fail: engine.state.prepared?.ok === false }">
       {{ preparedText }}
     </p>
@@ -69,16 +73,20 @@ const mixNow = () =>
         {{ q.deck.toUpperCase() }}:{{ q.name }}
       </span>
     </div>
+    <p v-else class="q-empty">尚无已播曲目（Mix 完成后在此滚动）</p>
     <p v-if="err" class="err">{{ err }}</p>
-  </section>
+    </div>
+  </MetalPanel>
 </template>
 
 <style scoped>
+/* 面板弹性填充：body 吃掉与邻居的高度差（panel-void 治理） */
+.automix-panel {
+  display: flex;
+  flex-direction: column;
+}
 .recpanel {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 10px 14px;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -88,30 +96,18 @@ const mixNow = () =>
   align-items: center;
   gap: 8px;
 }
-.head h3 {
-  margin: 0;
-  font-size: 13px;
-  letter-spacing: 2px;
-  color: var(--fg-dim);
+.head :deep(.lcd) {
   margin-right: auto;
 }
-.next {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.auto.on {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #0b0e14;
+.body {
+  flex: 1;
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 .mini {
   padding: 3px 10px;
-  font-size: 11px;
-}
-.body {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
+  font-size: 12px;
 }
 .name {
   font-size: 14px;
@@ -125,7 +121,12 @@ const mixNow = () =>
 .prepared {
   margin: 0;
   font-size: 12px;
-  color: #2fe37a;
+  color: var(--glow-green);
+}
+.usage {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-dim);
 }
 .prepared.fail {
   color: #ff6b6b;
@@ -143,20 +144,25 @@ const mixNow = () =>
   white-space: nowrap;
 }
 .q-lab {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--fg-dim);
 }
 .q-item {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--fg);
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 2px 6px;
 }
+.q-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
 .err {
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
   color: #ff6b6b;
 }
 </style>

@@ -1,0 +1,72 @@
+/* 本文件由 tools/gen_webui_tokens.py 从 config/static/ui.json 生成——
+   勿手改色值；改动 ui.json 配色/尺寸键后重跑生成器（token 同源纪律，PL006.1） */
+
+:root {
+  --bg: #0d0d0d;
+  --accent: #00ff41;
+  --deck-a: #00cccc;
+  --deck-b: #cccc00;
+  --warning: #ffcc00;
+  --danger: #ff4444;
+  --panel: #1c1e22;
+  --line: #26292f;
+  --panel-inset: #101215;
+  --fg-dim: #8a9099;
+  --fg: #e8ecf0;
+  --accent2: #ff7a2f;
+  --glow-blue: #2f8bff;
+  --glow-green: #2fe37a;
+  --pad-1: #ff7a2f;
+  --pad-2: #00cccc;
+  --pad-3: #2fe37a;
+  --pad-4: #ff4444;
+  --pad-5: #ffcc00;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --btn-min-w: 32px;
+  --btn-min-h: 32px;
+  --knob-mixer: 32px;
+  --knob-fx: 28px;
+  --jog-size: 140px;
+  --pad-size: 42px;
+  --layout-rows: max(790px, 37.5fr) max(400px, 10.0fr) max(790px, 37.5fr) max(560px, 15.0fr);
+  --led-segments: 12;
+  --led-green: 0.6;
+  --led-yellow: 0.85;
+}
+
+:root[data-theme="light"] {
+  --bg: #eef0f3;
+  --accent: #0a7a2f;
+  --deck-a: #0a7a8a;
+  --deck-b: #8a7a00;
+  --warning: #a86e00;
+  --danger: #c22222;
+  --panel: #e4e7ec;
+  --line: #c6cad2;
+  --panel-inset: #d2d6dd;
+  --fg-dim: #464c56;
+  --fg: #1c2026;
+  --accent2: #d95608;
+  --glow-blue: #1558c8;
+  --glow-green: #0a9a4a;
+  --pad-1: #d95608;
+  --pad-2: #0088aa;
+  --pad-3: #0a9a4a;
+  --pad-4: #c22222;
+  --pad-5: #a86e00;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --btn-min-w: 32px;
+  --btn-min-h: 32px;
+  --knob-mixer: 32px;
+  --knob-fx: 28px;
+  --jog-size: 140px;
+  --pad-size: 42px;
+  --layout-rows: max(790px, 37.5fr) max(400px, 10.0fr) max(790px, 37.5fr) max(560px, 15.0fr);
+  --led-segments: 12;
+  --led-green: 0.6;
+  --led-yellow: 0.85;
+}

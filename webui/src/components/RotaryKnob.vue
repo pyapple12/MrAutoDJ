@@ -100,11 +100,11 @@ function reset() {
   stroke-linecap: round;
 }
 .klabel {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--fg-dim);
 }
 .kval {
-  font-size: 10px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--fg);
 }

@@ -4,6 +4,10 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import type { EngineApi } from '../composables/useEngine'
+import MetalPanel from './skeuo/MetalPanel.vue'
+import BacklitButton from './skeuo/BacklitButton.vue'
+import MiniDisplay from './skeuo/MiniDisplay.vue'
+import Knob from './skeuo/Knob.vue'
 
 const props = defineProps<{ engine: EngineApi }>()
 
@@ -74,48 +78,56 @@ function statusText(): string {
 </script>
 
 <template>
-  <section class="fxpanel">
+  <MetalPanel title="BEAT FX">
+    <div class="fxpanel">
     <header class="head">
-      <h3>BEAT FX</h3>
-      <span class="status">{{ statusText() }}</span>
+      <MiniDisplay :text="statusText()" :warn="!engine.state.fx.on" />
     </header>
     <div class="row">
-      <button
+      <BacklitButton
         v-for="fx in FX_TYPES"
         :key="fx"
-        class="fx-btn"
-        :class="{ sel: effect === fx }"
+        size="sm"
+        :led="effect === fx && on ? 'accent' : null"
         @click="selectFx(fx)"
       >
         {{ fx }}
-      </button>
-      <button class="onoff" :class="{ on }" @click="toggleOn">{{ on ? 'ON' : 'OFF' }}</button>
+      </BacklitButton>
+      <BacklitButton size="sm" :led="on ? 'accent2' : null" @click="toggleOn">{{ on ? 'ON' : 'OFF' }}</BacklitButton>
     </div>
     <div class="row">
       <span class="lab">通道</span>
-      <button
+      <BacklitButton
         v-for="ch in ['1', '2', 'both'] as const"
         :key="ch"
-        class="ch-btn"
-        :class="{ sel: channel === ch }"
+        size="sm"
+        :led="channel === ch ? 'accent2' : null"
         @click="setChannel(ch)"
       >
         {{ ch === 'both' ? '1+2' : ch }}
-      </button>
+      </BacklitButton>
       <span class="lab">拍数</span>
       <select v-model.number="beats" @change="applyBeats">
         <option v-for="b in [1, 2, 3, 4, 8]" :key="b" :value="b">{{ b }}</option>
       </select>
-      <button class="mini" @click="fxAuto">AUTO</button>
-      <button class="mini" @click="fxTap">TAP</button>
+      <BacklitButton size="sm" @click="fxAuto">AUTO</BacklitButton>
+      <BacklitButton size="sm" @click="fxTap">TAP</BacklitButton>
     </div>
     <div class="row">
-      <span class="lab">深度</span>
-      <input v-model.number="depth" type="range" min="0" max="1" step="0.01" @change="applyDepth" />
-      <span class="val">{{ depth.toFixed(2) }}</span>
+      <Knob
+        v-model="depth"
+        :min="0"
+        :max="1"
+        :default-value="0.3"
+        :size="40"
+        label="深度"
+        :format="(v) => v.toFixed(2)"
+        @update:model-value="applyDepth"
+      />
     </div>
     <p v-if="err" class="err">{{ err }}</p>
-  </section>
+    </div>
+  </MetalPanel>
 </template>
 
 <style scoped>
@@ -165,7 +177,7 @@ function statusText(): string {
 }
 .mini {
   padding: 3px 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .row input[type='range'] {
   flex: 1;
@@ -173,7 +185,7 @@ function statusText(): string {
 }
 .lab,
 .val {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--fg-dim);
 }
 .val {
@@ -188,7 +200,7 @@ select {
 }
 .err {
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
   color: #ff6b6b;
 }
 </style>
