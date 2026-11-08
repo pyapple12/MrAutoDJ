@@ -1004,3 +1004,74 @@ Tauri 2 壳（Rust 零业务：窗口/文件对话框/sidecar 进程管理）
 ### 七、迁移后阶段池（不占本五案，届时按需立项）
 
 性能调优（指令往返/波形压缩/60Hz 流）｜深度测试（组件/协议矩阵/故障注入）｜韧性（心跳/自动重启/重连 UI 完整化）｜打包发布（PyInstaller sidecar + Tauri bundler + 安装包）｜视觉精修迭代
+
+---
+
+## 附录 PL008：迁移后第一期——功能补全 / 韧性 / 性能 / 深度测试 / 视觉精修（2026-11-08 立项）
+
+> 背景：UI 架构迁移五案（PL003-007）收官后的第一期集中补全。范围 = 迁移后阶段池首批 + 功能边界三项 + 工程卫生（Mimosa deep scan）；打包发布仍不做（用户定案）。
+> 状态：待实施。执行约定：probe 探针先行（TDD），子任务可按组并行；收口提交建议 `feat: V0.3.0.0`（前三段 0.2.9→0.3.0 推进，执行时确认）。
+
+### 一、组 A：功能边界补全
+
+**A1 Pad Sampler 装填入口（PL008.1）**
+- gateway 新增 `sample_load {deck, slot, path}`：`asyncio.to_thread(load_audio)` → `deck.sample_load(slot, audio)`；协议表 J 区补 **J6**
+- webui `PadBank.vue`：Sampler 模式下 pad 接受音频文件拖拽（dragstart 携带本地路径——经 Tauri 文件拖拽 API 或曲库行拖拽复用 `text/mrautodj-path`）+ 曲库行"装填到采样槽"右键/按钮；`sampler_loaded` 灯态 tick 已回显零改动
+- 验证：probe_gateway 扩展 J6 段（load→sample_load→tick sampler_loaded[slot]=true→pad Sampler play 真机出声）+ 组件测试拖拽触发指令
+
+**A2 Pad 模式全集盘点与补齐（PL008.2）**
+- 对照 DDJ-FLX4 pad 模式全集（w.study B13）盘点缺失三模式（候选：Track Loop / Vocal Loop / Keyboard 等）；**引擎已有能力直接接路由；引擎缺的如实标记"不做"**（不虚构能力）
+- 协议表 J5 `pad` 指令 mode 枚举扩充；webui PadBank MODES 数组同步
+- 验证：盘点清单落 z.plan 附录；可接入模式 probe 断言 + PadBank 模式切换组件测试
+
+**A3 监听平衡 v2（PL008.3）**
+- 引擎 `CuePlayer.set_balance(-1..1)`（若无则补：恒功率 pan——`gL=cos((b+1)π/4)`、`gR=sin((b+1)π/4)`，帧级增益分配）
+- gateway `set_phones_balance {balance}` 指令；协议 H 区补 **H3**
+- webui `MixerPanel.vue` 监听区加平衡 Knob（-1..1，双击回中）
+- 验证：探针合成正弦断言左右声道增益比（balance=±1 时对侧静音）；组件测试旋钮触发指令
+
+**A4 曲库兼容标记调性维度（PL008.4）**
+- webui `LibraryPanel.vue` `compatClass()` 加 Camelot 维度——打分对齐 `automix.key_score` 表（同调 1.0 / 相邻 ±1 0.9 / 能量阶 / 相对调 0.85 / 斜调 0.6 / 其他 0.2），与 BPM 维度取交集定色（绿=调和且 BPM 双兼容 / 黄=单维可用 / 灰=不推荐）
+- 曲库条目 `key` 字段 library_scan 已带出（零网关改动）
+- 验证：vitest LibraryPanel 分色断言（构造 8A vs 8A/9A/11A/5B 用例矩阵）
+
+### 二、组 B：韧性
+
+**B1 tick 自动重启（PL008.5）**
+- gateway `_tick_crash` done_callback 升级：崩溃（非 cancelled）→ 指数退避（0.5s 起 ×2 上限 8s）自动重建 `_tick_loop` 任务 + 广播 `{"type": "gateway_event", "event": "tick_restart", "attempt": N}`；10s 窗内连续 3 次崩溃放弃并广播 `tick_dead`（前端横幅"推流异常，指令不受影响"）
+- 容错登记：AGENTS 错误策略节补登（场景/降级/理由三要素）
+- 验证：探针 monkeypatch `_tick_frame` 抛错一次 → 断言 tick 流恢复 + 事件帧序列；连崩场景断言 tick_dead
+
+**B2 前端刷新恢复 snapshot（PL008.6）**
+- gateway 新增 `snapshot {}` 指令：返回 `{target, tempo_range, sync, fx, cue_active, decks: {a/b: {path(来自 _deck_meta), bpm, key, hot_cues, sampler_loaded, loop, slip, keylock, key_shift, tempo_rate}}}`
+- webui `useEngine.ts`：hello 到达后自动 `rpc('snapshot')` → 恢复 state + deckPath → 复用 load 钩子自动补请求 waveform
+- 验证：probe 断言 snapshot 与真实引擎状态逐字段一致；浏览器刷新后装载态/波形恢复截图
+
+**B3 曲库刷新保留（PL008.7）**
+- webui `LibraryPanel.vue`：folder/filter 持久化 localStorage（键 `mrautodj.lib.folder`）→ 刷新自动重扫（分析缓存命中即时回填）
+- 验证：浏览器刷新自动重扫截图 + localStorage 断言
+
+### 三、组 C：性能与深度测试
+
+**C1 往返延迟基线与优化（PL008.8）**
+- 新探针 `.temp/probe_perf.py`：rpc RTT p50/p95（1000 次 set_volume）+ tick 帧均值大小基线报告
+- 优化按测量结果定（候选：tick 低频字段裁剪/事件化、JSON 轻量化）；**退出线：本机 rpc p95 < 10ms**
+- 验证：probe_perf 报告归档 z.plan；退出线达标
+
+**C2 深度测试与安全审计（PL008.9）**
+- 协议矩阵：probe_gateway 扩展全 38 指令 × 参数边界/非法值段 + 10 并发客户端 stress
+- 故障注入：连接中途断开/畸形帧洪泛/sidecar kill→前端重连恢复（依赖 B1）
+- vitest 强化：WaveformView（wave 数据渲染分支）/ JogWheel（搓碟指令序列）交互冒烟
+- **Mimosa deep scan 补跑**（工程卫生）：五连软警告后首扫；报告落仓库外，seal 号回写 AGENTS 环境陷阱节
+- 验证：矩阵全绿 + vitest 绿 + scan seal 归档
+
+### 四、组 D：视觉精修首轮
+
+**D1 视觉细节与评审（PL008.10）**
+- 细节清单：转盘转动惯量阻尼感 / 波形播放头拖尾 / 按钮 press 微动效（scale 0.97）/ 面板材质噪点层次 / 旋钮指示联动
+- taste-skill inspect+critique 评审退出线 **overall ≥ 8.8**（基线 8.6）；截图归档 `.taste-skill/`
+
+### 五、组 E：收口
+
+**E1 收口提交（PL008.11）**
+- 文档回写（AGENTS 容错登记/README 特性/z.plan 状态/x.progress 勾选）；提交 `feat: V0.3.0.0，迁移后第一期（功能补全/韧性/性能/深度测试/视觉精修）`（前三段推进 0.3.0 执行时确认）

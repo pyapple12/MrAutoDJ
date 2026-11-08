@@ -592,3 +592,33 @@
 - [x] PL007.3 探针体系切换 —— 引擎/协议探针为门禁主力清单固化（AGENTS 门禁节重排：引擎探针+协议探针+vitest+tauri dev 冒烟）；PySide6 UI 探针（p5/p6/j0/pl001/patch001/patch002/fix004 部分）归档说明（行为断言由协议探针承接映射表）；验证：新门禁全绿跑通（2026-11-08 已验证：按 import 严格二分——28 个 PySide6 探针移 `.archived/probes/`，现役 8 个（engine/m15/p1/pl002_score/pl002_set/gateway/gateway_audio/pl007_gate）全绿跑通；AGENTS 门禁节重排：① 8 探针清单 ② 冒烟 import 去 ui.*（34→18 模块）③ webui build+test ④ 视觉截图；承接映射表写入门禁节——pad/TEMPO/循环/表演键→pl007_gate G9-G17、波形/分析/曲库→gateway G21-G25+gateway_audio A7）
 - [x] PL007.4 webui 测试基线 —— vitest 单测（useEngine/tokens 脚本等 composables 逻辑层）+ 组件冒烟（挂载/基本交互）；只建基线不追覆盖；验证：`npm test` 绿（2026-11-08 已验证：vitest+jsdom+@vue/test-utils 装机；vitest.config.ts（jsdom 环境）；useEngine.spec 5 用例——tick 帧覆盖/RPC 出站结构与 id 匹配 resolve/错误响应中文 reject/analysis 事件回填+done/prepared+mix_started 入状态/wave 元数据+二进制帧合成入库（f32 精度近似比较）；components.spec 5 用例——MixerPanel 挂载双通道渲染/TAP/CUE 监听指令触发、PadBank 五模式+8 槽渲染/pad 指令模式与 shift 传递；**10/10 全绿**；教训：jsdom Event shiftKey getter-only 不可 trigger 覆盖、test-utils FakeWS onmessage 需 setter 捕获）
 - [x] PL007.5 文档收口与提交 —— AGENTS.md（工具链/门禁/冒烟清单）、README（架构图/运行方式 dev 形态）、z.plan 里程碑表加"UI 架构迁移"条目、五附录状态回写；提交 `feat: V0.2.9.0，架构迁移五（PySide6 退役与工程体系切换）`（base.json 推进 0.2.9）（2026-11-08 已验证：AGENTS 入口行/门禁节/冒烟清单/依赖行四处收口；README 简介/使用说明（tauri dev+网关单跑+浏览器直连三形态）/项目结构（webui/shell/docs/tools 替换 ui/）三段重写+徽章 0.2.9；z.plan 总纲状态收官+附录·六签收清单归档；base.json 0.2.9+shell 三处版本同步；提交 V0.2.9.0 草案交用户）
+
+### PL008: 迁移后第一期——功能补全/韧性/性能/深度测试/视觉精修 [plan#附录 PL008]
+
+> 执行约定：probe 探针先行（TDD）；组间可并行；收口提交建议 feat: V0.3.0.0（执行时确认）。
+
+#### 组 A：功能边界补全
+
+- [ ] PL008.1 Sampler 装填入口 —— gateway 新增 `sample_load {deck, slot, path}`（asyncio.to_thread load_audio → deck.sample_load；协议 J 区补 J6）；webui PadBank.vue Sampler 模式 pad 接受音频拖拽 + 曲库行装填入口；验证：probe_gateway J6 段（sample_load→tick 灯态→play 出声）+ 组件拖拽测试
+- [ ] PL008.2 Pad 模式全集盘点 —— 对照 w.study B13 FLX4 pad 模式全集盘点缺失三模式（候选 Track Loop/Vocal Loop/Keyboard）；引擎已有能力直接接路由（协议 J5 mode 枚举扩充 + PadBank MODES 同步），引擎缺的如实标记不做；验证：盘点清单落 z.plan + 可接入模式 probe 断言 + 组件切换测试
+- [ ] PL008.3 监听平衡 v2 —— 引擎 CuePlayer.set_balance(-1..1)（缺则补恒功率 pan：gL=cos((b+1)π/4)/gR=sin）；gateway `set_phones_balance` 指令（协议 H 区补 H3）；webui MixerPanel 监听区加平衡 Knob；验证：探针断言左右声道增益比（±1 对侧静音）+ 组件旋钮指令测试
+- [ ] PL008.4 兼容标记调性维度 —— webui LibraryPanel.vue compatClass() 加 Camelot 维度（打分对齐 automix.key_score 表：同调 1.0/相邻 0.9/相对 0.85/斜调 0.6/其他 0.2），与 BPM 维度交集定色；曲库 key 字段已带出零网关改动；验证：vitest LibraryPanel 分色断言（8A vs 8A/9A/11A/5B 用例矩阵）
+
+#### 组 B：韧性
+
+- [ ] PL008.5 tick 自动重启 —— gateway _tick_crash 升级：崩溃→指数退避（0.5s×2 上限 8s）自动重建 _tick_loop + 广播 gateway_event tick_restart；10s 窗 3 连崩放弃并广播 tick_dead（前端横幅）；AGENTS 容错登记；验证：探针 monkeypatch _tick_frame 抛错→断言恢复+事件帧、连崩断言 tick_dead
+- [ ] PL008.6 前端刷新恢复 snapshot —— gateway 新增 `snapshot {}` 指令（target/量程/sync/fx/监听/两盘装载 meta+灯态）；useEngine hello 后自动 rpc snapshot 恢复 state+deckPath（复用 load 钩子补请求 waveform）；验证：probe 断言 snapshot 与引擎状态逐字段一致 + 浏览器刷新恢复截图
+- [ ] PL008.7 曲库刷新保留 —— webui LibraryPanel.vue folder/filter 持久化 localStorage（键 mrautodj.lib.folder）→ 刷新自动重扫（缓存命中即时回填）；验证：刷新自动重扫截图 + localStorage 断言
+
+#### 组 C：性能与深度测试
+
+- [ ] PL008.8 往返延迟基线与优化 —— 新探针 .temp/probe_perf.py：rpc RTT p50/p95（1000 次）+ tick 帧均大小基线；优化按测量定（候选：tick 低频字段裁剪/事件化）；退出线本机 rpc p95 < 10ms；验证：probe_perf 报告归档 z.plan + 退出线达标
+- [ ] PL008.9 深度测试与安全审计 —— probe_gateway 扩展全 38 指令×参数边界/非法值矩阵 + 10 并发 stress；故障注入（中途断连/畸形帧洪泛/sidecar kill 恢复——依赖 8.5）；vitest 补 WaveformView/JogWheel 交互冒烟；**Mimosa deep scan 补跑**（五连软警告后首扫，报告落仓库外，seal 号回写 AGENTS）；验证：矩阵全绿 + vitest 绿 + scan seal 归档
+
+#### 组 D：视觉精修首轮
+
+- [ ] PL008.10 视觉细节与评审 —— 细节清单（转盘阻尼感/波形播放头拖尾/按钮 press 微动效 scale 0.97/面板材质噪点层次/旋钮指示联动）；taste-skill inspect+critique 退出线 overall ≥ 8.8（基线 8.6）；验证：截图归档 .taste-skill + 评审达标
+
+#### 组 E：收口
+
+- [ ] PL008.11 收口提交 —— 文档回写（AGENTS 容错登记/README 特性/z.plan 状态/勾选）；提交 feat: V0.3.0.0，迁移后第一期（前三段推进 0.3.0 执行时确认）
