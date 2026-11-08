@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "默认窗口能力（事件监听等核心权限）",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:default"]
 }

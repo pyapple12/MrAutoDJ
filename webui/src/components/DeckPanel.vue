@@ -6,6 +6,7 @@ import { computed, ref, watch } from 'vue'
 import type { DeckState, EngineApi } from '../composables/useEngine'
 import JogWheel from './JogWheel.vue'
 import PadBank from './PadBank.vue'
+import WaveformView from './WaveformView.vue'
 
 const props = defineProps<{
   letter: 'a' | 'b'
@@ -59,6 +60,17 @@ const loadTrack = () =>
       errMsg.value = '请先输入音频文件路径'
       return
     }
+    await props.engine.rpc('load', { deck: props.letter, path: p })
+    lastPath.value = p
+    // 波形请求由 useEngine load 成功钩子自动发出（PL005.3）
+  })
+
+// 拖拽装载（曲库行 dragstart text/mrautodj-path → drop 装载）
+const onDrop = (ev: DragEvent) =>
+  run(async () => {
+    const p = ev.dataTransfer?.getData('text/mrautodj-path')
+    if (!p) return
+    ev.preventDefault()
     await props.engine.rpc('load', { deck: props.letter, path: p })
     lastPath.value = p
   })
@@ -120,7 +132,12 @@ const stateText = computed(() =>
 </script>
 
 <template>
-  <section class="deck-panel" :class="{ target: engine.state.target === letter }">
+  <section
+    class="deck-panel"
+    :class="{ target: engine.state.target === letter }"
+    @dragover.prevent
+    @drop="onDrop"
+  >
     <header class="deck-head">
       <h2>DECK {{ letter.toUpperCase() }}</h2>
       <span class="badge" :class="deck.state">{{ stateText }}</span>
@@ -166,6 +183,8 @@ const stateText = computed(() =>
       <span class="eff" v-if="deck.bpm > 0 && deck.tempo_rate !== 1">→ {{ (deck.bpm * deck.tempo_rate).toFixed(1) }}</span>
     </div>
 
+    <WaveformView :letter="letter" :engine="engine" :wave="engine.waveFor(engine.state.deckPath[letter] || '')" />
+
     <div class="progress-row">
       <span>{{ fmtTime(deck.position) }}</span>
       <input
@@ -197,13 +216,6 @@ const stateText = computed(() =>
     </div>
 
     <PadBank :letter="letter" :engine="engine" />
-
-    <div class="vu-row">
-      <span>VU</span>
-      <div class="vu-track">
-        <div class="vu-fill" :style="{ width: Math.round(deck.vu * 100) + '%' }"></div>
-      </div>
-    </div>
 
     <p v-if="errMsg" class="err">{{ errMsg }}</p>
   </section>

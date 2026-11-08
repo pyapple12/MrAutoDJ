@@ -1,8 +1,11 @@
-# MrAutoDJ IPC 协议 v1.1（PL003/PL004）
+# MrAutoDJ IPC 协议 v1.2（PL003/PL004/PL005）
 
 > Tauri 壳 ↔ Python sidecar 的 WebSocket 协议权威定义。实现：`modules/gateway.py`；
 > 任何协议变更必须先改本文档（版本号递增），再改实现。
-> v1.1（PL004.1）：控制面指令全集（对照 main_window 接线清单），tick 帧扩灯态字段；
+> v1.1（PL004.1）：控制面指令全集（对照 main_window 接线清单），tick 帧扩灯态字段。
+> v1.2（PL005）：曲库/分析/波形数据层——`library_scan`/`waveform` 指令、
+> `analysis`/`analysis_done`/`prepared`/`mix_started`/`wave` 事件帧、
+> 二进制峰值帧启用；`load` 响应扩 downbeats/name 并自动记录盘 meta；
 > 均为 v1 内兼容扩展（`protocol_version` 保持 1，见 §7）。
 
 ## 1. 概述
@@ -121,13 +124,21 @@
 | H1 | `phones_preview` | `deck` | `{active: deck/null}` | 独占切换（再点同盘停止；无设备 → `not_ready`） |
 | H2 | `set_phones_volume` | `volume` | `{volume}` | 监听音量 0..1 |
 
-**推荐 / Automix（A1-A3，对照推荐区；automix 注入前 → `not_ready`，曲库数据 PL005）**
+**推荐 / Automix（A1-A4，对照推荐区；automix 注入后激活——曲库数据由 `library_scan` 填充）**
 
 | # | cmd | args | result | 语义 |
 | --- | --- | --- | --- | --- |
 | A1 | `recommend` | — | `{name, explanation}` | 推荐下一曲（名称+中文理由）；无推荐 → `bad_state` |
 | A2 | `set_automix` | `on` | `{on}` | AUTO 自动接歌开关 |
-| A3 | `prepare_next` | — | `{entry: {path, name}}` | 以目标盘为 now 预备下一曲；失败 → `bad_state` |
+| A3 | `prepare_next` | — | `{entry: {path, name}}` | 以目标盘为 now 预备下一曲（烘焙异步完成推 `prepared` 事件帧）；失败 → `bad_state` |
+| A4 | `mix`（见 T8） | `deck` | `{triggered}` | 转场触发；Mix 完成（30Hz 轮询消费）推 `mix_started` 事件帧并滚动盘 meta，AUTO 开时自动链式装填下一曲 |
+
+**曲库 / 波形（L1-L2，PL005）**
+
+| # | cmd | args | result | 语义 |
+| --- | --- | --- | --- | --- |
+| L1 | `library_scan` | `folder` | `{files: [{path,name,bpm,key,energy,analyzed}], analyzing}` | 扫描目录 → 缓存命中填充 → 后台线程分析（逐曲 `analysis` 事件帧回填）；分析中重复调用 → `bad_state`；fake 模式合成条目即时返回 |
+| L2 | `waveform` | `path`, `width?`（默认 2000，钳 200..4000） | `{width, duration}` | 解码 → 峰值降采样 → 下发 **wave 元数据帧 + 二进制 peaks 帧成对**（顺序见 §4.2） |
 
 `deck` 取值 `"a"` | `"b"`，非法即 `bad_args`。`shift`（J5）为显式布尔参数（前端 Shift 键状态）。
 
@@ -162,10 +173,37 @@
 - `t`：服务端单调时钟，仅供客户端算抖动
 - tick 帧可丢弃（见 §8 流控）；**绝不进音频回调**——纯事件循环读锁内状态
 
-### 4.2 二进制峰值帧（预留，PL005 启用）
+### 4.2 事件帧（v1.2 全集）与二进制峰值帧
 
-服务端下行 `bytes` 帧，little-endian `f32` 数组，用于波形渲染（服务端复用
-`_build_peaks` 峰值提取）。v1 不发送；客户端应忽略收到的二进制帧。
+**`wave` 波形帧（元数据 + 二进制成对，L2 触发）**：先推 JSON 元数据帧，**紧随**一条
+二进制帧（同一客户端出站队列顺序保证成对）：
+
+```json
+{"type": "wave", "path": "…", "width": 2000, "duration": 210.0,
+ "bpm": 128.0, "downbeats": [0, 46875, …]}
+```
+
+二进制帧载荷 = `MRWK`（4 字节幻数）+ f32 **little-endian** 数组（(width, 2) 交错
+[min, max] 列）；客户端按 `(len-4)/8` 列解析。元数据帧后若无二进制帧（队列满丢弃）
+客户端可重新请求。实现解析参考 `modules/waveform_data.peaks_from_bytes`。
+
+**`analysis` 分析进度帧（逐曲，后台线程回填）**：
+
+```json
+{"type": "analysis", "path": "…", "name": "song.mp3", "ok": true,
+ "bpm": 128.0, "key": "8A", "energy": 5, "error": ""}
+```
+
+失败降级：`ok=false` 且 `error` 非空（中文原因），不中断整批。
+
+**`analysis_done`**：`{"type": "analysis_done", "succeeded": N, "total": M}`
+
+**`prepared` 预备完成帧**：`{"type": "prepared", "deck": "a", "ok": true,
+"path": "…", "name": "…", "error": ""}`（烘焙异步完成回执，失败 error 中文）
+
+**`mix_started` 转场完成帧**：`{"type": "mix_started", "deck": "a", "now": "…",
+"now_name": "…", "finished": "…", "chained": true}`（来曲 meta 已滚动、
+AUTO 开时 chained=已自动链式装填）
 
 ## 5. 错误码表
 

@@ -7,7 +7,8 @@ import { useShift } from './composables/useShift'
 import DeckPanel from './components/DeckPanel.vue'
 import MixerPanel from './components/MixerPanel.vue'
 import BeatFxPanel from './components/BeatFxPanel.vue'
-import RecPanel from './components/RecPanel.vue'
+import AutomixPanel from './components/AutomixPanel.vue'
+import LibraryPanel from './components/LibraryPanel.vue'
 
 const engine = useEngine()
 const { state: shiftState } = useShift()
@@ -54,11 +55,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
     <div class="bottom">
       <BeatFxPanel :engine="engine" />
-      <RecPanel :engine="engine" />
+      <AutomixPanel :engine="engine" />
     </div>
 
+    <LibraryPanel :engine="engine" />
+
     <footer class="foot">
-      <span>网关 ws://127.0.0.1:{{ engine.gatewayPort() }}（PL004 控制面全量对齐）</span>
+      <span>网关 ws://127.0.0.1:{{ engine.gatewayPort() }}（PL005 数据层）</span>
     </footer>
   </main>
 </template>

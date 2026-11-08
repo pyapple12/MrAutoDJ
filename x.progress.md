@@ -569,11 +569,11 @@
 
 ### PL005: 曲库/分析/Automix 数据层（架构迁移 3/5） [plan#架构迁移 → z.plan.md 附录总纲·三]
 
-- [ ] PL005.1 曲库表 —— 虚拟滚动/搜索过滤/兼容标记/双击装载/拖拽到盘/Instant Doubles；folder 选择走 Tauri dialog 插件（RPC→Rust 侧 dialog）；验证：数据一致性 probe（曲库状态==引擎装载双向核对）
-- [ ] PL005.2 分析进度流 —— gateway 分析编排（后台线程 analyze_many→事件帧回填：逐曲结果/失败降级/FakeEngine 快速模式）；前端进度显示与失败态；验证：probe 断言事件帧序列与降级路径
-- [ ] PL005.3 波形数据管线 —— 服务端峰值计算（复用 _build_peaks 逻辑抽公共）→ 二进制帧（f32 LE base64 过渡）一次传输+播放头增量 tick；下拍网格/BPM 标线 Canvas 分层；验证：probe 断言峰值数组正确性 + 前端渲染抽样
-- [ ] PL005.4 Automix 面板 —— 推荐区（NEXT/AUTO/explanation）、Prepare/Mix 状态可视化（EQ 渐变进行中提示）、已播/队列展示；验证：AUTO 链协议级断言（复用 fix005 A 组场景）
-- [ ] PL005.5 验收 —— M1+M2 全功能 Web 可用清单签收 + 全量回归；提交 `feat: V0.2.8.2，架构迁移三（曲库分析数据层）`
+- [x] PL005.1 曲库表 —— 虚拟滚动/搜索过滤/兼容标记/双击装载/拖拽到盘/Instant Doubles；folder 选择走 Tauri dialog 插件（RPC→Rust 侧 dialog）；验证：数据一致性 probe（曲库状态==引擎装载双向核对）（2026-11-08 已验证：LibraryPanel.vue——目录扫描（Tauri 环境 dialog 插件/浏览器手输）+搜索过滤+虚拟滚动（行高 30px 可视窗口渲染）+兼容点（对侧盘 BPM ±6% 绿/±12% 黄）+双击装载（500ms 同路径再双击=Instant Doubles M4 指令）+行拖拽到盘（dataTransfer path→DeckPanel drop）；数据一致性=load 曲库补全（无 bpm args 时 entry 命中补全 bpm/downbeats/name，G22 探针断言）+浏览器冒烟装载后 badge 播放中/BPM 126.0；shell 加 tauri-plugin-dialog（Cargo/main.rs/capabilities）cargo build 过）
+- [x] PL005.2 分析进度流 —— gateway 分析编排（后台线程 analyze_many→事件帧回填：逐曲结果/失败降级/FakeEngine 快速模式）；前端进度显示与失败态；验证：probe 断言事件帧序列与降级路径（2026-11-08 已验证：gateway _start_analysis 后台 daemon 线程（call_soon_threadsafe 跨线程投递）——analysis 逐曲事件帧（ok/bpm/key/energy/error）+analysis_done（succeeded/total）；降级路径 probe_gateway_audio A7 段断言（good.wav ok+bpm>0 / bad.wav 坏文件 error 非空不中断 / done succeeded=1 total=2）；fake 模式合成 5 条即时返回；前端 LibraryPanel 进度文案（分析中…/完成 N/M 含失败数）+未分析条目 dim 显灰）
+- [x] PL005.3 波形数据管线 —— 服务端峰值计算（复用 _build_peaks 逻辑抽公共）→ 二进制帧（f32 LE base64 过渡）一次传输+播放头增量 tick；下拍网格/BPM 标线 Canvas 分层；验证：probe 断言峰值数组正确性 + 前端渲染抽样（2026-11-08 已验证：modules/waveform_data.py 抽公共（build_peaks/peaks_bytes/peaks_from_bytes，waveform_widget 改 import 消双实现）；协议 wave 元数据帧+二进制帧（MRWK 幻数+f32 LE 2000×2 列）成对下发（G25 探针断言幻数/列数/元数据字段）；WaveformView.vue 单 Canvas 三层（已播/未播分色波形+下拍网格+播放头）——渲染驱动改 watch tick 30Hz（后台页签 rAF 节流冻结教训）；load 成功钩子自动请求波形（useEngine 波形仓库 LRU 8 条）；浏览器像素抽样 painted>0+截图核对）
+- [x] PL005.4 Automix 面板 —— 推荐区（NEXT/AUTO/explanation）、Prepare/Mix 状态可视化（EQ 渐变进行中提示）、已播/队列展示；验证：AUTO 链协议级断言（复用 fix005 A 组场景）（2026-11-08 已验证：AutomixPanel.vue（替换 RecPanel）——NEXT（recommend+prepare_next）/MIX 按钮触发转场/AUTO 开关/预备状态回显（prepared 事件帧 ok/error）/EQ 渐变进行中提示（任一盘 MIXING）/已播队列（mix_started 事件帧聚合 deck:名）；协议级：recommend 评分链探针 G23（注入 AutomixController 断言 name+explanation）+set_automix；真引擎 automix 注入（CLI 构造 AutomixController(tm, entries_getter, now_meta_getter 闭包迟绑定)）；mix 完成 meta 滚动+自动链式（_poll_mix_finished 每 tick 消费 take_mix_finished——tick 循环 fail-soft 防护，FakeEngine take_mix_finished 补齐））
+- [x] PL005.5 验收 —— M1+M2 全功能 Web 可用清单签收 + 全量回归；提交 `feat: V0.2.8.2，架构迁移三（曲库分析数据层）`（2026-11-08 已验证：M1 清单——传输/CUE/seek/TEMPO 量程/Keylock/KeyShift/Sync/循环系/Beatloop/Jog 三类/Pad 五模式/表演键/EQ/TRIM/横推/主音量/FaderStart/Tap/监听/AUTO 接歌（协议 38 条指令）全量 Web 可用；M2 清单——曲库扫描/搜索/分析进度流/波形+下拍网格/推荐 NEXT/AUTO/Mix 触发/已播队列 Web 可用；全量回归 34 探针全过 + vue-tsc/vite build 过 + 浏览器全链冒烟（扫描 5 条→双击装载 BPM 补全→波形渲染 painted>0→曲库/推荐/FX 四区截图核对））
 
 ### PL006: 拟物视觉与动效体系（架构迁移 4/5） [plan#架构迁移 → z.plan.md 附录总纲·四]
 

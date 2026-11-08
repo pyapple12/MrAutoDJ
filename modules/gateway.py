@@ -7,12 +7,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import threading
 import time
+from pathlib import Path
 
 import numpy as np
 import websockets
 
 from config.static.static_config import get_static_config
+from modules.waveform_data import build_peaks, peaks_bytes
 from utils.logger import get_logger
 
 _BASE = get_static_config().base
@@ -232,6 +235,10 @@ class FakeDeck:
     def sample_state(self, slot: int) -> dict:
         return {"loaded": self._samples[slot]}
 
+    def take_mix_finished(self) -> bool:
+        # 假 mix 完成消费（接口对齐真 Deck；假件无转场流程恒 False）
+        return False
+
     def jog_touch(self, on: bool) -> None:
         self._jog_touched = bool(on)
 
@@ -345,6 +352,7 @@ class Gateway:
         self.engine = engine
         self.tm = tm
         self.automix = automix
+        self.use_fake = bool(use_fake)
         self.tick_hz = max(1, int(tick_hz))
         self.slot_count = int(_BASE.get("slot_count", 8))
         # 网关侧 UI 状态（对齐 main_window 拥有的非引擎状态；引擎零改动）
@@ -354,6 +362,12 @@ class Gateway:
         self._fx = {"effect": "", "depth": 0.0, "on": False, "channel": "1", "beats": 4}
         self._target = "a"
         self._cue_active: str | None = None
+        # 曲库与分析（PL005：条目含 record 供 automix 评分与波形网格）
+        self._entries: list[dict] = []
+        self._deck_meta: dict[str, dict | None] = {"a": None, "b": None}
+        self._analyzing = False
+        self._analysis_stop = False
+        self._pending_prepare: dict[str, dict | None] = {"a": None, "b": None}
         self._clients: set[_ClientConn] = set()
         self._server = None
         self._tick_task: asyncio.Task | None = None
@@ -408,10 +422,14 @@ class Gateway:
             "recommend": self._cmd_recommend,
             "set_automix": self._cmd_set_automix,
             "prepare_next": self._cmd_prepare_next,
+            # 曲库 / 波形（PL005）
+            "library_scan": self._cmd_library_scan,
+            "waveform": self._cmd_waveform,
         }
 
     async def serve(self, host: str = "127.0.0.1", port: int = 0) -> int:
         # 启动 WS 服务与推流协程；port=0 动态分配，返回实际端口
+        self._loop = asyncio.get_running_loop()
         self._server = await websockets.serve(self._client_loop, host, port)
         actual = int(self._server.sockets[0].getsockname()[1])
         self._tick_task = asyncio.create_task(self._tick_loop())
@@ -525,6 +543,11 @@ class Gateway:
         interval = 1.0 / self.tick_hz
         next_t = time.monotonic()
         while True:
+            try:
+                self._poll_mix_finished()  # mix 完成消费（meta 滚动 + 自动接歌链式）
+            except Exception:
+                _logger.exception("mix 完成消费异常（本轮跳过）")
+                self._pending_prepare = {"a": None, "b": None}
             frame = json.dumps(self._tick_frame())
             for conn in list(self._clients):
                 try:
@@ -537,6 +560,45 @@ class Gateway:
                 next_t = time.monotonic()  # 落后超过一个周期则重对齐，防雪崩追赶
                 delay = 0.0
             await asyncio.sleep(max(0.0, delay))
+
+    def _poll_mix_finished(self) -> None:
+        # mix 完成消费（对齐 UI _tick 的消费段）：take_mix_finished → 来曲 meta
+        # 滚动 + 自动模式 on_mix_started 链式装填 + mix_started 事件帧
+        for letter in ("a", "b"):
+            deck = getattr(self.engine, f"deck_{letter}")
+            if not deck.take_mix_finished():
+                continue
+            incoming = self._pending_prepare.get(letter)
+            finished_meta = self._deck_meta.get(letter)
+            if incoming is not None:
+                # 来曲 meta 滚动（entry 含 record——automix 评分字段齐）
+                self._deck_meta[letter] = {
+                    "path": incoming["path"],
+                    "bpm": float(incoming.get("bpm") or 0.0),
+                    "key": str(incoming.get("key") or "?"),
+                    "energy": incoming.get("energy", 0),
+                    "timbre": incoming.get("timbre"),
+                    "downbeats": list(incoming.get("record", {}).get("downbeats", [])),
+                }
+                self._pending_prepare[letter] = None
+            finished_path = (finished_meta or {}).get("path", "")
+            now_meta = self._deck_meta.get(letter) or {}
+            chain: dict | None = None
+            if self.automix is not None and self.automix.auto_mode:
+                chain = self.automix.on_mix_started(deck, finished_path)
+                if chain is not None:
+                    self._pending_prepare[letter] = chain
+            self._broadcast_json(
+                {
+                    "type": "mix_started",
+                    "deck": letter,
+                    "now": now_meta.get("path", ""),
+                    "now_name": Path(now_meta.get("path", "未装载")).name,
+                    "finished": finished_path,
+                    "chained": bool(chain),
+                }
+            )
+            _logger.info("mix 完成 DECK %s：now=%s", letter.upper(), now_meta.get("path", ""))
 
     def _tick_frame(self) -> dict:
         # 组装状态帧：两盘状态 + 顶级 UI 状态回显（target/量程/sync/fx/监听）
@@ -603,8 +665,10 @@ class Gateway:
         return max(0.0, min(1.0, float(v)))
 
     async def _cmd_load(self, args: dict) -> dict:
-        # load {deck, path, bpm?}：解码（线程池）→ 装填播放 → 可选 BPM 对齐
+        # load {deck, path, bpm?}：解码（线程池）→ 装填播放 → BPM 对齐；
+        # 曲库命中时补全 bpm/downbeats 并记录盘 meta（automix now_meta 数据源）
         deck = self._req_deck(args)
+        letter = str(args.get("deck") or "").lower()
         path = str(args.get("path") or "").strip()
         if not path:
             raise GatewayError(E_BAD_ARGS, "path 不能为空")
@@ -615,12 +679,207 @@ class Gateway:
         except Exception as exc:
             raise GatewayError(E_ENGINE, f"加载失败: {exc}") from exc
         deck.play(audio)
+        entry = self._entry_by_path(path)
         bpm = args.get("bpm")
+        if bpm is None and entry is not None:
+            bpm = entry.get("bpm") or 0.0
         if bpm:
             deck.set_tempo(float(bpm))
+        downbeats = list((entry or {}).get("record", {}).get("downbeats", []))
+        # 记录盘 meta（对齐 UI _make_deck_meta：automix 评分与 mix 完成滚动用）
+        self._deck_meta[letter] = {
+            "path": path,
+            "bpm": float(bpm or 0.0),
+            "key": str((entry or {}).get("key", "?")),
+            "energy": (entry or {}).get("energy", 0),
+            "timbre": (entry or {}).get("timbre"),
+            "downbeats": downbeats,
+        }
         duration = len(audio) / SAMPLE_RATE
         _logger.info("load %s（%.1fs）", path, duration)
-        return {"duration": duration, "bpm": float(getattr(deck, "bpm", 0.0) or 0.0)}
+        return {
+            "duration": duration,
+            "bpm": float(getattr(deck, "bpm", 0.0) or 0.0),
+            "downbeats": downbeats,
+            "name": str((entry or {}).get("name") or Path(path).name),
+        }
+
+    def _entry_by_path(self, path: str) -> dict | None:
+        # 曲库条目查找（path 精确匹配）
+        return next((e for e in self._entries if e["path"] == path), None)
+
+    # --- 曲库 / 分析 / 波形（PL005：扫描即读缓存，后台分析事件帧回填） ---
+
+    def _entry_from_record(self, path: str, rec: dict | None) -> dict:
+        # 缓存记录/空记录 → 曲库条目（name/record 全量保留，前端与 automix 共用）
+        rec = rec or {}
+        return {
+            "path": path,
+            "name": Path(path).name,
+            "bpm": float(rec.get("bpm") or 0.0),
+            "key": str(rec.get("key") or "?"),
+            "energy": rec.get("energy", 0),
+            "timbre": rec.get("timbre"),
+            "record": {
+                "downbeats": list(rec.get("downbeats", [])),
+                "cues": list(rec.get("cues", [])),
+            },
+            "analyzed": bool(rec),
+        }
+
+    def _cmd_library_scan(self, args: dict) -> dict:
+        # library_scan {folder}：扫描目录 → 缓存命中填充 → 启动后台分析
+        # （事件帧 analysis 逐曲回填 + analysis_done；fake 模式合成条目即时回填）
+        folder = str(args.get("folder") or "").strip()
+        if not folder:
+            raise GatewayError(E_BAD_ARGS, "folder 不能为空")
+        if self._analyzing:
+            raise GatewayError(E_BAD_STATE, "已有分析任务进行中（等待完成或重启网关）")
+        if self.use_fake:
+            # 假件快速模式：合成 5 条条目（不触盘不分析，评分链路可跑）
+            self._entries = [self._fake_entry(f"{folder.rstrip('/\\')}/track_{i}.mp3") for i in range(1, 6)]
+            return {"files": [self._public_entry(e) for e in self._entries], "analyzing": False}
+        from modules.analyzer import AnalysisCache, scan_folder  # 重依赖延迟导入
+
+        try:
+            paths = scan_folder(folder)
+        except Exception as exc:
+            raise GatewayError(E_ENGINE, f"扫描失败: {exc}") from exc
+        cache = AnalysisCache()
+        try:
+            self._entries = []
+            for p in paths:
+                rec = cache.get(p, require_cues=False)
+                self._entries.append(self._entry_from_record(p, rec))
+        finally:
+            cache.close()
+        self._start_analysis([e["path"] for e in self._entries if not e["analyzed"]])
+        return {"files": [self._public_entry(e) for e in self._entries], "analyzing": self._analyzing}
+
+    @staticmethod
+    def _fake_entry(path: str) -> dict:
+        # 假条目：固定 BPM 梯度（120 起）+ 标准调性（评分可跑）
+        i = abs(hash(path)) % 12
+        bpm = 120.0 + (i % 6) * 2.0
+        rec = {
+            "bpm": bpm,
+            "key": f"{(i % 12) + 1}A",
+            "energy": 3 + (i % 3),
+            "timbre": [0.4 + 0.01 * (i % 5)] * 13,
+            "downbeats": [int(k * 60.0 / bpm * SAMPLE_RATE) for k in range(32)],
+        }
+        return {
+            "path": path,
+            "name": Path(path).name,
+            "bpm": bpm,
+            "key": rec["key"],
+            "energy": rec["energy"],
+            "timbre": rec["timbre"],
+            "record": {"downbeats": rec["downbeats"], "cues": []},
+            "analyzed": True,
+        }
+
+    @staticmethod
+    def _public_entry(e: dict) -> dict:
+        # 条目 → 前端视图（record 内层不外发，downbeats 由 load/waveform 传递）
+        return {
+            "path": e["path"],
+            "name": e["name"],
+            "bpm": e["bpm"],
+            "key": e["key"],
+            "energy": e["energy"],
+            "analyzed": e["analyzed"],
+        }
+
+    def _start_analysis(self, paths: list[str]) -> None:
+        # 后台线程分析编排：analyze_many 回调 → 事件帧（asyncio.run_coroutine_threadsafe
+        # 跨线程投递）；单曲失败事件帧 error 不中断整批（analyzer 内建降级）
+        if not paths:
+            return
+        loop = asyncio.get_running_loop()
+        self._analyzing = True
+        self._analysis_stop = False
+
+        def on_result(path: str, rec: dict | None, err: Exception | None) -> None:
+            # 分析回调（工作线程）：更新条目 + 事件帧（跨线程投递到事件循环）
+            entry = self._entry_by_path(path)
+            if entry is not None and rec is not None:
+                upd = self._entry_from_record(path, rec)
+                entry.update({k: upd[k] for k in ("bpm", "key", "energy", "timbre", "record", "analyzed")})
+            frame = {
+                "type": "analysis",
+                "path": path,
+                "name": Path(path).name,
+                "ok": err is None and rec is not None,
+                "bpm": float((rec or {}).get("bpm") or 0.0),
+                "key": str((rec or {}).get("key") or "?"),
+                "energy": (rec or {}).get("energy", 0),
+                "error": "" if err is None else str(err),
+            }
+            loop.call_soon_threadsafe(self._broadcast_json, frame)
+
+        def worker() -> None:
+            from modules.analyzer import analyze_many  # 重依赖延迟导入（工作线程内）
+
+            try:
+                succeeded = analyze_many(
+                    paths,
+                    on_result,
+                    use_cache=True,
+                    should_stop=lambda: self._analysis_stop,
+                )
+                loop.call_soon_threadsafe(
+                    self._broadcast_json,
+                    {"type": "analysis_done", "succeeded": succeeded, "total": len(paths)},
+                )
+            finally:
+                loop.call_soon_threadsafe(self._analysis_finished)
+
+        threading.Thread(target=worker, name="gateway-analysis", daemon=True).start()
+
+    def _analysis_finished(self) -> None:
+        # 分析收尾（事件循环线程）
+        self._analyzing = False
+
+    def _broadcast_json(self, frame: dict) -> None:
+        # 广播 JSON 帧（工作线程经 call_soon_threadsafe 进入；队列满丢弃+warning）
+        raw = json.dumps(frame)
+        for conn in list(self._clients):
+            try:
+                conn.queue.put_nowait(raw)
+            except asyncio.QueueFull:
+                _logger.warning("客户端出站队列满，事件帧丢弃")
+
+    async def _cmd_waveform(self, args: dict) -> dict:
+        # waveform {path}：解码 → 峰值降采样 → 元数据帧 + 二进制帧成对下发
+        # （复用 build_peaks 公共实现；峰值列数取请求 width 钳 200..4000）
+        path = str(args.get("path") or "").strip()
+        if not path:
+            raise GatewayError(E_BAD_ARGS, "path 不能为空")
+        width = int(args.get("width") or 2000)
+        width = max(200, min(4000, width))
+        try:
+            audio = await asyncio.to_thread(self.engine.load_audio, path)
+        except Exception as exc:
+            raise GatewayError(E_ENGINE, f"解码失败: {exc}") from exc
+        peaks = await asyncio.to_thread(build_peaks, audio, width)
+        entry = self._entry_by_path(path)
+        # 二进制帧入队必须在元数据帧之后（同队列顺序保证成对到达）
+        meta = {
+            "type": "wave",
+            "path": path,
+            "width": width,
+            "duration": len(audio) / SAMPLE_RATE,
+            "bpm": float((entry or {}).get("bpm") or 0.0),
+            "downbeats": list((entry or {}).get("record", {}).get("downbeats", [])),
+        }
+        for conn in list(self._clients):
+            try:
+                conn.queue.put_nowait(json.dumps(meta))
+                conn.queue.put_nowait(peaks_bytes(peaks))
+            except asyncio.QueueFull:
+                pass  # 慢客户端丢整对（前端可重新请求，容错登记见说明区）
+        return {"width": width, "duration": len(audio) / SAMPLE_RATE}
 
     def _cmd_play(self, args: dict) -> dict:
         # play {deck}：幂等播放（已播放则无操作；pause 为 toggle，故仅暂停时翻转）
@@ -1041,27 +1300,56 @@ class Gateway:
         return {"on": bool(automix.auto_mode)}
 
     def _cmd_prepare_next(self, args: dict) -> dict:
-        # prepare_next：以目标盘为 now 预备下一曲（rubberband 烘焙；依赖曲库）
+        # prepare_next：以目标盘为 now 预备下一曲（rubberband 烘焙异步——
+        # on_done 跨线程投递 prepared 事件帧；返回 entry 即"已受理"）
         automix = self._req_automix()
         now_deck = getattr(self.engine, f"deck_{self._target}")
-        entry = automix.prepare_next(now_deck)
+        target = self._target
+
+        def on_done(err: Exception | None = None) -> None:
+            # 闭包捕获 target/entry（prepare_next 返回后迟绑定生效）
+            self._on_prepared(target, entry, err)  # noqa: F821
+
+        entry = automix.prepare_next(now_deck, on_done=on_done)
         if entry is None:
             raise GatewayError(E_BAD_STATE, "推荐预备失败（当前盘需 PLAYING 且已知 BPM）")
+        self._pending_prepare[target] = entry
         return {"entry": {"path": entry["path"], "name": entry.get("name", "")}}
+
+    def _on_prepared(self, target: str, entry: dict | None, err: Exception | None = None) -> None:
+        # 烘焙完成回调（tm 工作线程）：prepared 事件帧跨线程投递（成功/失败中文化）
+        frame = {
+            "type": "prepared",
+            "deck": target,
+            "ok": err is None,
+            "path": (entry or {}).get("path", ""),
+            "name": (entry or {}).get("name", ""),
+            "error": "" if err is None else f"烘焙失败: {err}",
+        }
+        self._loop.call_soon_threadsafe(self._broadcast_json, frame)
 
 
 async def _run_main(host: str, port: int, use_fake: bool) -> None:
     # CLI 主协程：默认真引擎（真机出声）；--fake 换假引擎（无设备联调）；
     # 真引擎构造/退出全程 try/finally 保证 close（释放音频设备）
     engine = None
-    tm = None
     if not use_fake:
         from modules.engine import AudioEngine  # 重依赖延迟导入（sounddevice 设备初始化）
-        from modules.transition_manager import TransitionManager
 
         engine = AudioEngine()
-        tm = TransitionManager(engine)  # mix 指令激活（prepare 依赖曲库，PL005 注入）
-    gw = Gateway(engine=engine, tm=tm, use_fake=use_fake)
+    gw = Gateway(engine=engine, use_fake=use_fake)
+    if not use_fake:
+        # 真引擎注入 tm 与 automix（mix/推荐/自动接歌指令激活；曲库数据
+        # 来自 library_scan 填充的 _entries——闭包迟绑定）
+        from modules.automix import AutomixController
+        from modules.transition_manager import TransitionManager
+
+        gw.tm = TransitionManager(engine)
+        gw.automix = AutomixController(
+            gw.tm,
+            entries_getter=lambda: gw._entries,
+            now_meta_getter=lambda: gw._deck_meta.get(gw._target) or {},
+        )
     try:
         actual = await gw.serve(host, port)
         print(f"gateway ready port={actual}", flush=True)  # 就绪握手行（Tauri 读取）

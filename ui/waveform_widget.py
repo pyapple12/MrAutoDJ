@@ -1,5 +1,6 @@
 # 波形控件：离线峰值降采样缓存 + 播放头滚动（D4.3）
 # 渲染用 QPainter（深色主题，颜色取 config/static/ui.json）
+# 峰值算法抽公共（PL005.3）：modules/waveform_data.build_peaks（网关二进制帧同源）
 
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
+from modules.waveform_data import build_peaks as _build_peaks_impl
 from ui import palette
 from ui.palette import ThemeAware
 
@@ -15,25 +17,8 @@ from ui.palette import ThemeAware
 
 
 def _build_peaks(audio: np.ndarray, width: int) -> np.ndarray:
-    # 双通道峰值降采样：每像素列取 [min, max]（返回 (width, 2) float32）
-    if audio is None or len(audio) == 0 or width <= 0:
-        return np.zeros((max(1, width), 2), dtype=np.float32)
-    n = len(audio)
-    # H0.3：1D mono 输入防护（原 np.mean(axis=1) 对 1D 抛 AxisError）
-    mono = audio if audio.ndim == 1 else np.mean(audio, axis=1)
-    mono = np.asarray(mono, dtype=np.float64)
-    if n <= width:
-        # 短音频：直接重采样到目标宽度
-        idx = np.linspace(0, n - 1, width).astype(int)
-        col = mono[idx]
-        return np.stack([col, col], axis=1).astype(np.float32)
-    per = n // width
-    peaks = np.zeros((width, 2), dtype=np.float32)
-    for i in range(width):
-        seg = mono[i * per : (i + 1) * per]
-        peaks[i, 0] = seg.min()
-        peaks[i, 1] = seg.max()
-    return peaks
+    # 转发公共实现（保留模块内旧名兼容既有引用；算法单源 modules/waveform_data）
+    return _build_peaks_impl(audio, width)
 
 
 class WaveformWidget(ThemeAware, QWidget):

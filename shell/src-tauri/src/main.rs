@@ -75,6 +75,7 @@ fn spawn_gateway(app: &tauri::AppHandle) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init()) // 目录选择对话框（PL005.1 曲库装载）
         .manage(Sidecar(Mutex::new(None)))
         .setup(|app| {
             // spawn 放独立线程（stdout 就绪行读取阻塞，不得卡 setup）
