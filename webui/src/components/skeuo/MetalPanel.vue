@@ -18,6 +18,8 @@ defineProps<{
 .metal {
   position: relative;
   background:
+    /* PL008.10 材质噪点层：微网点叠拉丝（金属磨砂观感） */
+    radial-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
     linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.12)),
     repeating-linear-gradient(
       93deg,
@@ -26,6 +28,7 @@ defineProps<{
       color-mix(in srgb, var(--panel) 88%, #ffffff) 3px,
       var(--panel) 4px
     );
+  background-size: 5px 5px, 100% 100%, 100% 100%;
   border: 1px solid var(--line);
   border-radius: 10px;
   box-shadow:

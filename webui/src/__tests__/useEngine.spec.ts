@@ -16,7 +16,9 @@ let wsHandler: ((ev: MessageEvent) => void) | null = null
 class FakeWS {
   binaryType = ''
   sent: string[] = []
-  constructor(public url: string) {
+  url: string
+  constructor(url: string) {
+    this.url = url
     expect(url).toContain('ws://127.0.0.1:')
   }
   set onmessage(fn: ((ev: MessageEvent) => void) | null) {

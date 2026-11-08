@@ -50,6 +50,19 @@ async function hit(idx: number, ev: PointerEvent | MouseEvent) {
     err.value = e instanceof Error ? e.message : String(e)
   }
 }
+
+// Sampler 拖拽装填（PL008.1 J6）：音频路径拖到采样槽 → sample_load
+async function loadSample(idx: number, ev: DragEvent) {
+  const p = ev.dataTransfer?.getData('text/mrautodj-path')
+  if (!p) return
+  ev.preventDefault()
+  err.value = ''
+  try {
+    await props.engine.rpc('sample_load', { deck: props.letter, slot: idx, path: p })
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : String(e)
+  }
+}
 </script>
 
 <template>
@@ -64,6 +77,7 @@ async function hit(idx: number, ev: PointerEvent | MouseEvent) {
       >
         {{ m }}
       </button>
+      <span v-if="mode === 'Sampler'" class="sampler-hint">拖拽曲库曲目到采样槽装填</span>
     </header>
     <div class="pads">
       <button
@@ -76,7 +90,10 @@ async function hit(idx: number, ev: PointerEvent | MouseEvent) {
             (mode === 'Sampler' && deck.sampler_loaded[i]) ||
             (mode === 'Key Shift' && deck.key_shift === SEMITONES[i]),
         }"
+        :title="mode === 'Sampler' ? '拖拽曲库曲目到本槽装填 · 点击播放 · Shift+点击卸载' : undefined"
         @pointerdown="hit(i, $event)"
+        @dragover.prevent
+        @drop="loadSample(i, $event)"
       >
         {{ label }}
       </button>
@@ -126,6 +143,11 @@ async function hit(idx: number, ev: PointerEvent | MouseEvent) {
 .err {
   margin: 0;
   font-size: 12px;
-  color: #ff6b6b;
+  color: var(--danger);
+}
+.sampler-hint {
+  font-size: 12px;
+  color: var(--fg-dim);
+  margin-left: auto;
 }
 </style>

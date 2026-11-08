@@ -10,10 +10,23 @@ import MiniDisplay from './skeuo/MiniDisplay.vue'
 
 const props = defineProps<{ engine: EngineApi }>()
 
-const folder = ref('')
+// 曲库目录持久化（PL008.7）：localStorage 记忆上次目录，刷新自动重扫
+// （分析缓存命中即时回填）；Tauri/浏览器均适用
+const folder = ref(localStorage.getItem('mrautodj.lib.folder') ?? '')
 const filter = ref('')
 const err = ref('')
 const scanning = ref(false)
+
+// 连接后自动重扫（有记忆目录时）——等 snapshot/首轮 tick 稳定后触发一次
+if (folder.value) {
+  const stop = window.setInterval(() => {
+    if (props.engine.state.connected) {
+      window.clearInterval(stop)
+      void scan()
+    }
+  }, 400)
+  window.setTimeout(() => window.clearInterval(stop), 15000) // 兜底清定时器
+}
 const ROW_H = 30
 const VIEW_H = 264
 let lastDbl: { path: string; t: number } | null = { path: '', t: 0 }
@@ -44,13 +57,58 @@ const otherDeckBpm = computed(() => {
   const st = props.engine.state[d]
   return st.bpm > 0 ? st.bpm * st.tempo_rate : 0
 })
+const otherDeckKey = computed(() => {
+  // 兼容标记参照：对侧盘调性（网关未回显 key——经 state.deckPath→entries 反查，
+  // 装载自曲库的曲目可得；手输路径装载无 key → 解析失败中性）
+  const d = props.engine.state.target === 'a' ? 'b' : 'a'
+  const path = props.engine.state.deckPath[d]
+  const hit = props.engine.state.entries.find((x) => x.path === path)
+  return hit?.key ?? ''
+})
+
+// Camelot 兼容分（PL008.4：对齐 automix.key_score 打分表——同调 1.0 / 相邻能量阶
+// 0.9 / 相对调 0.85 / 对角 0.6 / 其他 0.2；解析失败中性 0.5）
+const KEY_SAME = 1.0
+const KEY_ENERGY = 0.9
+const KEY_RELATIVE = 0.85
+const KEY_DIAGONAL = 0.6
+const KEY_OTHER = 0.2
+const KEY_NEUTRAL = 0.5
+
+function parseCamelot(key: string): [number, string] | null {
+  // "8A" / "12B" → (号, 字母)；非法 null（曲库 key 字段为 Camelot 记谱）
+  const m = /^(\d{1,2})([AB])$/.exec((key ?? '').trim().toUpperCase())
+  if (!m) return null
+  const n = Number(m[1])
+  return n >= 1 && n <= 12 ? [n, m[2]] : null
+}
+
+function camelotScore(keyA: string, keyB: string): number {
+  const ka = parseCamelot(keyA)
+  const kb = parseCamelot(keyB)
+  if (!ka || !kb) return KEY_NEUTRAL
+  if (ka[0] === kb[0]) return ka[1] === kb[1] ? KEY_SAME : KEY_RELATIVE
+  const diff = Math.abs(ka[0] - kb[0])
+  const adjacent = diff === 1 || diff === 11
+  if (ka[1] === kb[1]) return adjacent ? KEY_ENERGY : KEY_OTHER
+  return adjacent ? KEY_DIAGONAL : KEY_OTHER
+}
 
 function compatClass(e: LibEntry): string {
-  // 简易兼容点：BPM ±6% 内绿点、±12% 内黄点、否则灰（调性维度 PL006 深化）
-  if (e.bpm <= 0 || otherDeckBpm.value <= 0) return 'gray'
-  const r = e.bpm / otherDeckBpm.value
-  if (r > 0.94 && r < 1.06) return 'green'
-  if (r > 0.88 && r < 1.12) return 'yellow'
+  // 双维交集定色（PL008.4）：调性 ≥0.85 且 BPM ±6% → 绿；单维达标 → 黄；否则灰
+  if ((e.bpm <= 0 || otherDeckBpm.value <= 0) && !parseCamelot(e.key)) return 'gray'
+  const bpmOk = (() => {
+    if (e.bpm <= 0 || otherDeckBpm.value <= 0) return null
+    const r = e.bpm / otherDeckBpm.value
+    if (r > 0.94 && r < 1.06) return true
+    if (r > 0.88 && r < 1.12) return false // ±12% 黄区
+    return null
+  })()
+  const keyOk = camelotScore(e.key, otherDeckKey.value) >= 0.85
+  if (bpmOk === null) return keyOk ? 'yellow' : 'gray' // 无 BPM：仅调性达标给黄
+  if (bpmOk && keyOk) return 'green'
+  if (bpmOk || (bpmOk === false && keyOk && !e.bpm)) return 'yellow'
+  if (bpmOk === false && keyOk) return 'yellow'
   return 'gray'
 }
 
@@ -84,6 +142,7 @@ async function scan() {
       analyzing: boolean
     }
     props.engine.setEntries(r.files) // 条目填充（后续 analysis 事件帧逐曲回填）
+    localStorage.setItem('mrautodj.lib.folder', f) // PL008.7：目录持久化
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e)
   } finally {

@@ -48,10 +48,12 @@ const ledStyle = computed(() => {
   cursor: pointer;
   box-shadow: 0 2px 3px rgba(0, 0, 0, 0.4);
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
+  /* PL008.10 press 微动效：轻缩 + 下压（硬件键手感） */
+  transition: transform 60ms ease, box-shadow 60ms ease;
 }
 .bl:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
-  transform: translateY(1px);
 }
 .bl.sm {
   padding: 3px 10px;

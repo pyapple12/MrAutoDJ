@@ -3,7 +3,7 @@
      （按住拖=搓碟/滚轮+关Vinyl拖=弯音/Shift+拖=搜索/vinyl 本地态）；
      渲染 tick 数据驱动（后台页签 rAF 节流教训——不用 rAF 循环） -->
 <script setup lang="ts">
-import { onMounted, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import type { EngineApi } from '../../composables/useEngine'
 import { useShift } from '../../composables/useShift'
 
@@ -16,6 +16,7 @@ const { isShift } = useShift()
 
 const vinyl = defineModel<boolean>('vinyl', { default: true })
 const touching = defineModel<boolean>('touching', { default: false })
+const displayRot = ref(0) // PL008.10 转盘显示角（阻尼插值态）
 
 const SCRATCH_GAIN = 256
 const BEND_STEP = 0.05
@@ -70,7 +71,13 @@ function draw() {
   // 内盘（乙烯基：黑色基底 + 细纹路随播放位置旋转）
   const rInner = rOuter * 0.7
   const d = props.engine.state[props.letter]
-  const rot = d.duration > 0 ? (d.position / d.duration) * Math.PI * 2 : 0
+  // 转盘角阻尼（PL008.10）：显示角度向目标角度插值（60ms 追 25%——转动惯量观感，
+  // 搓碟/弯音快速变化时画面不跳变；数据仍是 tick 30Hz 驱动）
+  const targetRot = d.duration > 0 ? (d.position / d.duration) * Math.PI * 2 : 0
+  const prev = displayRot.value
+  const delta = targetRot - prev
+  displayRot.value = prev + delta * 0.25
+  const rot = displayRot.value
   ctx.save()
   ctx.beginPath()
   ctx.arc(cx, cy, rInner, 0, Math.PI * 2)

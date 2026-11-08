@@ -1,6 +1,6 @@
 [package]
 name = "mrautodj-shell"
-version = "0.2.9"
+version = "0.3.0"
 edition = "2021"
 description = "MrAutoDJ Tauri 壳（零业务：spawn sidecar + 端口握手 + 退出清理）"
 

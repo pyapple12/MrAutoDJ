@@ -1023,6 +1023,7 @@ Tauri 2 壳（Rust 零业务：窗口/文件对话框/sidecar 进程管理）
 - 对照 DDJ-FLX4 pad 模式全集（w.study B13）盘点缺失三模式（候选：Track Loop / Vocal Loop / Keyboard 等）；**引擎已有能力直接接路由；引擎缺的如实标记"不做"**（不虚构能力）
 - 协议表 J5 `pad` 指令 mode 枚举扩充；webui PadBank MODES 数组同步
 - 验证：盘点清单落 z.plan 附录；可接入模式 probe 断言 + PadBank 模式切换组件测试
+- **盘点结论（2026-11-08 回写）**：FLX4 八模式 = Hot Cue/Beat Loop/Beat Jump/Sampler/Key Shift（✅ 五模式已实现）+ **Keyboard(Mixxx 映射 Stems)/Pad FX1/Pad FX2（❌ 三项不做）**——Keyboard/Stems 需人声分离依赖（对齐"人声冲突维度不做"决策，依赖缺位）；Pad FX1/2 为 rekordbox 专属效果组（B13 记载 Mixxx 未实现），现有引擎无对应 oneshot 效果设计——未来如需，独立方案立项（引擎 oneshot 效果 + pad 映射），本 PL 不做
 
 **A3 监听平衡 v2（PL008.3）**
 - 引擎 `CuePlayer.set_balance(-1..1)`（若无则补：恒功率 pan——`gL=cos((b+1)π/4)`、`gR=sin((b+1)π/4)`，帧级增益分配）

@@ -1,6 +1,6 @@
 # MrAutoDJ —— 虚拟 DJ 台与 AI 电台
 
-[![Version](https://img.shields.io/badge/Version-0.2.9-blue.svg)](config/static/base.json)
+[![Version](https://img.shields.io/badge/Version-0.3.0-blue.svg)](config/static/base.json)
 [![Python](https://img.shields.io/badge/Python-3.14+-green.svg)](https://www.python.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 

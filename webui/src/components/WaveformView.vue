@@ -60,7 +60,12 @@ function draw() {
     ctx.lineTo(x, h)
     ctx.stroke()
   }
-  // ③ 播放头
+  // ③ 播放头 + 拖尾（PL008.10：播放头后 24px 渐隐尾迹——滚动观感增强）
+  const tail = ctx.createLinearGradient(playedX, 0, playedX + 24, 0)
+  tail.addColorStop(0, 'rgba(232, 237, 247, 0.35)')
+  tail.addColorStop(1, 'rgba(232, 237, 247, 0)')
+  ctx.fillStyle = tail
+  ctx.fillRect(playedX, 0, Math.min(24, w - playedX), h)
   ctx.strokeStyle = '#e8edf7'
   ctx.lineWidth = 2
   ctx.beginPath()

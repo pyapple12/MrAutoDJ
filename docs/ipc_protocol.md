@@ -1,4 +1,4 @@
-# MrAutoDJ IPC 协议 v1.2（PL003/PL004/PL005）
+# MrAutoDJ IPC 协议 v1.3（PL003-PL005/PL008）
 
 > Tauri 壳 ↔ Python sidecar 的 WebSocket 协议权威定义。实现：`modules/gateway.py`；
 > 任何协议变更必须先改本文档（版本号递增），再改实现。
@@ -6,6 +6,8 @@
 > v1.2（PL005）：曲库/分析/波形数据层——`library_scan`/`waveform` 指令、
 > `analysis`/`analysis_done`/`prepared`/`mix_started`/`wave` 事件帧、
 > 二进制峰值帧启用；`load` 响应扩 downbeats/name 并自动记录盘 meta；
+> v1.3（PL008）：`sample_load`（J6）/`set_phones_balance`（H3）/`snapshot` 指令、
+> `gateway_event` 事件帧（tick 自动重启通报）；均为 v1 内兼容扩展（`protocol_version` 保持 1，见 §7）。
 > 均为 v1 内兼容扩展（`protocol_version` 保持 1，见 §7）。
 
 ## 1. 概述
@@ -106,6 +108,7 @@
 | J3 | `jog_bend` | `deck`, `rate` | `{rate}` | 弯音（钳 ±jog_bend_max；前端管累积与超时归零） |
 | J4 | `jog_search` | `deck`, `rate` | `{rate}` | SHIFT 高速搜索（钳 ±jog_search_max） |
 | J5 | `pad` | `deck`, `idx`, `mode`, `shift` | 按模式 | 五模式：Hot Cue（shift=清除/无=有则播放无则设）/ Beat Loop（拍梯 1-2-4-8-16-32；shift=关循环）/ Beat Jump（1/2/4/8 拍，前 4 后 4）/ Sampler（shift=卸载/有则播放）/ Key Shift（半音表 0,+1,+2,+3,-3,-2,-1,0；shift=累加/0 复位） |
+| J6 | `sample_load` | `deck`, `slot`, `path` | `{slot, duration, loaded}` | 采样槽装填（解码线程池）；`pad` Sampler 模式播放/卸载（PL008.1） |
 
 **Beat FX（F1-F5，对照 Beat FX 区）**
 
@@ -123,6 +126,7 @@
 | --- | --- | --- | --- | --- |
 | H1 | `phones_preview` | `deck` | `{active: deck/null}` | 独占切换（再点同盘停止；无设备 → `not_ready`） |
 | H2 | `set_phones_volume` | `volume` | `{volume}` | 监听音量 0..1 |
+| H3 | `set_phones_balance` | `balance` | `{balance}` | 监听平衡 -1..1（恒功率 pan，钳制；PL008.3） |
 
 **推荐 / Automix（A1-A4，对照推荐区；automix 注入后激活——曲库数据由 `library_scan` 填充）**
 
@@ -139,6 +143,7 @@
 | --- | --- | --- | --- | --- |
 | L1 | `library_scan` | `folder` | `{files: [{path,name,bpm,key,energy,analyzed}], analyzing}` | 扫描目录 → 缓存命中填充 → 后台线程分析（逐曲 `analysis` 事件帧回填）；分析中重复调用 → `bad_state`；fake 模式合成条目即时返回 |
 | L2 | `waveform` | `path`, `width?`（默认 2000，钳 200..4000） | `{width, duration}` | 解码 → 峰值降采样 → 下发 **wave 元数据帧 + 二进制 peaks 帧成对**（顺序见 §4.2） |
+| L3 | `snapshot` | — | `{target, tempo_range, sync, fx, cue_active, decks: {a/b: {path, bpm, key, tempo_rate, key_shift, keylock, loop, slip, hot_cues, sampler_loaded}}}` | 刷新恢复快照（PL008.6）：前端 hello 后自动拉取恢复 UI 状态与装载 meta |
 
 `deck` 取值 `"a"` | `"b"`，非法即 `bad_args`。`shift`（J5）为显式布尔参数（前端 Shift 键状态）。
 
@@ -204,6 +209,11 @@
 **`mix_started` 转场完成帧**：`{"type": "mix_started", "deck": "a", "now": "…",
 "now_name": "…", "finished": "…", "chained": true}`（来曲 meta 已滚动、
 AUTO 开时 chained=已自动链式装填）
+
+**`gateway_event` 网关事件帧（PL008.5）**：
+`{"type": "gateway_event", "event": "tick_restart"}`（推流崩溃自动恢复通报）/
+`{"type": "gateway_event", "event": "tick_dead"}`（10s 窗 3 连崩放弃重启——
+前端横幅提示"推流异常，指令不受影响"）
 
 ## 5. 错误码表
 

@@ -277,6 +277,7 @@ class FakeCuePlayer:
     def __init__(self):
         self.is_dead = False
         self.playing = False
+        self.balance = 0.0
 
     def play(self, buf) -> None:
         self.playing = True
@@ -286,6 +287,9 @@ class FakeCuePlayer:
 
     def set_volume(self, v: float) -> None:
         pass
+
+    def set_balance(self, b: float) -> None:
+        self.balance = float(b)
 
 
 class FakeCrossfader:
@@ -371,6 +375,7 @@ class Gateway:
         self._clients: set[_ClientConn] = set()
         self._server = None
         self._tick_task: asyncio.Task | None = None
+        self._tick_crash_times: list[float] = []  # PL008.5：tick 崩溃时间窗（限次重启）
         # 指令路由表（PL003 v1 8 条 + PL004 控制面全集；锁语义沿用引擎内部锁）
         self._routes = {
             # 传输（PL003）
@@ -409,6 +414,8 @@ class Gateway:
             "jog_search": self._cmd_jog_search,
             # Pad
             "pad": self._cmd_pad,
+            # Sampler 装填（PL008.1 J6）
+            "sample_load": self._cmd_sample_load,
             # Beat FX
             "set_fx": self._cmd_set_fx,
             "set_fx_channel": self._cmd_set_fx_channel,
@@ -418,6 +425,8 @@ class Gateway:
             # Phones 监听
             "phones_preview": self._cmd_phones_preview,
             "set_phones_volume": self._cmd_set_phones_volume,
+            # 监听平衡（PL008.3 H3）
+            "set_phones_balance": self._cmd_set_phones_balance,
             # 推荐 / Automix
             "recommend": self._cmd_recommend,
             "set_automix": self._cmd_set_automix,
@@ -425,6 +434,8 @@ class Gateway:
             # 曲库 / 波形（PL005）
             "library_scan": self._cmd_library_scan,
             "waveform": self._cmd_waveform,
+            # 快照恢复（PL008.6）
+            "snapshot": self._cmd_snapshot,
         }
 
     async def serve(self, host: str = "127.0.0.1", port: int = 0) -> int:
@@ -432,20 +443,44 @@ class Gateway:
         self._loop = asyncio.get_running_loop()
         self._server = await websockets.serve(self._client_loop, host, port)
         actual = int(self._server.sockets[0].getsockname()[1])
-        self._tick_task = asyncio.create_task(self._tick_loop())
-
-        def _tick_crash(task: asyncio.Task) -> None:
-            # tick 任务异常不留死角：崩溃记 ERROR 日志（推流是装饰层，主业务 RPC
-            # 不受影响——事件循环存活；不做自动重启，属韧性后置池）
-            if task.cancelled():
-                return
-            exc = task.exception()
-            if exc is not None:
-                _logger.exception("tick loop 任务崩溃（推流停止，RPC 不受影响）", exc_info=exc)
-
-        self._tick_task.add_done_callback(_tick_crash)
+        self._start_tick_loop()
         _logger.info("gateway 就绪 %s:%s tick=%sHz", host, actual, self.tick_hz)
         return actual
+
+    def _start_tick_loop(self) -> None:
+        # 启动推流任务并挂崩溃自愈（PL008.5）：done_callback 记日志 + 指数退避
+        # 自动重建（0.5s×2 上限 8s）；10s 窗内 3 连崩放弃并广播 tick_dead——
+        # 推流是装饰层（状态可由下一帧自愈），RPC 主业务不受影响
+        self._tick_task = self._loop.create_task(self._tick_loop())
+        self._tick_task.add_done_callback(self._on_tick_done)
+
+    def _on_tick_done(self, task: asyncio.Task) -> None:
+        # tick 任务收尾：取消/正常退出仅记日志；异常→限次自动重启（事件循环侧）
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None:
+            _logger.info("tick loop 任务意外退出（无异常）")
+            return
+        _logger.warning("tick loop 崩溃，准备自动重启（%s: %s）", type(exc).__name__, exc)
+        now = time.monotonic()
+        self._tick_crash_times = [t for t in self._tick_crash_times if now - t < 10.0]
+        self._tick_crash_times.append(now)
+        if len(self._tick_crash_times) >= 3:
+            _logger.error("tick loop 10s 内 3 连崩，放弃重启（推流停止，RPC 不受影响）")
+            self._broadcast_json({"type": "gateway_event", "event": "tick_dead"})
+            return
+        delay = min(0.5 * (2 ** (len(self._tick_crash_times) - 1)), 8.0)
+        self._loop.call_later(delay, self._restart_tick_loop, exc)
+
+    def _restart_tick_loop(self, prev_exc: Exception) -> None:
+        # 延迟重建推流任务 + 广播恢复事件（前端横幅提示）；
+        # 守卫 = 网关未停止（stop() 会关 server 置 None，此时不重建）
+        if self._server is None:
+            return
+        _logger.warning("tick loop 已重启（上次崩溃: %s: %s）", type(prev_exc).__name__, prev_exc)
+        self._start_tick_loop()
+        self._broadcast_json({"type": "gateway_event", "event": "tick_restart"})
 
     async def stop(self) -> None:
         # 停止推流与服务（侧车退出路径；客户端连接随 server close 断开）
@@ -874,6 +909,34 @@ class Gateway:
             except asyncio.QueueFull:
                 _logger.warning("客户端出站队列满，事件帧丢弃")
 
+    def _cmd_snapshot(self, args: dict) -> dict:
+        # snapshot {}（PL008.6）：刷新恢复快照——网关侧 UI 状态 + 两盘装载 meta/灯态；
+        # 前端 hello 后自动拉取，恢复 deckPath 触发波形续接（load 钩子路径）
+        decks = {}
+        for letter in ("a", "b"):
+            deck = getattr(self.engine, f"deck_{letter}")
+            meta = self._deck_meta.get(letter) or {}
+            decks[letter] = {
+                "path": meta.get("path", ""),
+                "bpm": float(meta.get("bpm") or 0.0),
+                "key": str(meta.get("key") or "?"),
+                "tempo_rate": float(getattr(deck, "tempo_rate", 1.0)),
+                "key_shift": int(getattr(deck, "key_shift", 0)),
+                "keylock": bool(getattr(deck, "_keylock_on", False)),
+                "loop": bool(deck.loop_active()) if callable(getattr(deck, "loop_active", None)) else False,
+                "slip": bool(deck.slip_active()) if callable(getattr(deck, "slip_active", None)) else False,
+                "hot_cues": [bool(deck.hot_cue_state(i)["has"]) for i in range(self.slot_count)],
+                "sampler_loaded": [bool(deck.sample_state(i)["loaded"]) for i in range(self.slot_count)],
+            }
+        return {
+            "target": self._target,
+            "tempo_range": dict(self._tempo_range),
+            "sync": dict(self._sync_on),
+            "fx": dict(self._fx),
+            "cue_active": self._cue_active,
+            "decks": decks,
+        }
+
     async def _cmd_waveform(self, args: dict) -> dict:
         # waveform {path}：解码 → 峰值降采样 → 元数据帧 + 二进制帧成对下发
         # （复用 build_peaks 公共实现；峰值列数取请求 width 钳 200..4000）
@@ -1205,6 +1268,26 @@ class Gateway:
             return {"mode": mode, "idx": idx, "key_shift": int(getattr(deck, "key_shift", 0))}
         raise GatewayError(E_BAD_ARGS, f"未知 Pad 模式: {mode}")
 
+    async def _cmd_sample_load(self, args: dict) -> dict:
+        # sample_load {deck, slot, path}（PL008.1 J6）：解码（线程池）→ 装填采样槽
+        deck = self._req_deck(args)
+        idx = int(args.get("slot") or 0)
+        path = str(args.get("path") or "").strip()
+        if idx < 0 or idx >= self.slot_count:
+            raise GatewayError(E_BAD_ARGS, f"slot 超出 0..{self.slot_count - 1}")
+        if not path:
+            raise GatewayError(E_BAD_ARGS, "path 不能为空")
+        try:
+            audio = await asyncio.to_thread(self.engine.load_audio, path)
+        except Exception as exc:
+            raise GatewayError(E_ENGINE, f"采样加载失败: {exc}") from exc
+        deck.sample_load(idx, audio)
+        return {
+            "slot": idx,
+            "duration": len(audio) / SAMPLE_RATE,
+            "loaded": bool(deck.sample_state(idx)["loaded"]),
+        }
+
     # --- Beat FX（PL004 对照 beat fx 组状态 + 通道应用） ---
 
     def _fx_channel_decks(self) -> list:
@@ -1301,6 +1384,15 @@ class Gateway:
         if player is not None:
             player.set_volume(v)
         return {"volume": v}
+
+    def _cmd_set_phones_balance(self, args: dict) -> dict:
+        # set_phones_balance {balance}（PL008.3 H3）：监听平衡 -1..1（恒功率 pan）
+        b = self._req_float(args, "balance")
+        b = max(-1.0, min(1.0, b))
+        player = self.engine.ensure_cue_player()
+        if player is not None and hasattr(player, "set_balance"):
+            player.set_balance(b)
+        return {"balance": b}
 
     # --- 推荐 / Automix（PL004 协议占位；automix 注入后激活——曲库数据 PL005） ---
 

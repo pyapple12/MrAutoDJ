@@ -17,6 +17,7 @@ const masterVol = ref(1.0)
 const xfaderPos = ref(0.0)
 const faderStart = ref(false)
 const phonesVol = ref(1.0)
+const phonesBal = ref(0.0)
 
 const trim = ref<Record<'a' | 'b', number>>({ a: 1.0, b: 1.0 })
 const eq = ref<Record<'a' | 'b', Record<'low' | 'mid' | 'high', number>>>({
@@ -42,6 +43,7 @@ const toggleFaderStart = () => run(() => props.engine.rpc('fader_start', { on: f
 const tap = (d: 'a' | 'b') => run(() => props.engine.rpc('tap', { deck: d }))
 const preview = (d: 'a' | 'b') => run(() => props.engine.rpc('phones_preview', { deck: d }))
 const setPhonesVol = () => run(() => props.engine.rpc('set_phones_volume', { volume: phonesVol.value }))
+const setPhonesBal = () => run(() => props.engine.rpc('set_phones_balance', { balance: phonesBal.value }))
 
 const xfaderLabel = computed(() => {
   // 横推位置读数（-1=A 全出 / 0=居中 / 1=B 全出）
@@ -114,6 +116,15 @@ const xfaderLabel = computed(() => {
             label="监听"
             :format="(v) => v.toFixed(2)"
             @update:model-value="setPhonesVol"
+          />
+          <Knob
+            v-model="phonesBal"
+            :min="-1"
+            :max="1"
+            label="平衡"
+            :size="32"
+            :format="(v) => (v < -0.02 ? `L ${Math.abs(v).toFixed(2)}` : v > 0.02 ? `R ${v.toFixed(2)}` : '居中')"
+            @update:model-value="setPhonesBal"
           />
         </div>
       </div>

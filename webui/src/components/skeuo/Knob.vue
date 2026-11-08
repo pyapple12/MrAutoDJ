@@ -116,6 +116,11 @@ const ticks = Array.from({ length: 11 }, (_, i) => -135 + i * 27)
   stroke-width: 3.5;
   stroke-linecap: round;
   filter: drop-shadow(0 0 4px var(--glow-blue));
+  /* PL008.10 指示联动：拖拽中辉光增强（指针即操作反馈） */
+  transition: filter 80ms ease;
+}
+.knob.dragging .needle {
+  filter: drop-shadow(0 0 9px var(--glow-blue)) drop-shadow(0 0 3px #ffffff);
 }
 .klabel {
   font-size: 12px;

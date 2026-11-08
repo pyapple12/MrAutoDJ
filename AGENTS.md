@@ -18,7 +18,7 @@
 - `.venv` 是机器绑定的：`pyvenv.cfg` 的 `home` 指向创建时机器的 Python 路径。换机器/换用户后解释器损坏，症状是 VSCode Python 扩展报 `write EPIPE / Shutting down server`（Jedi 语言服务器无法启动）。重建：`Remove-Item -Recurse -Force .venv; py -3.14 -m venv .venv; .\.venv\Scripts\python.exe -m pip install -r requirements.txt`，然后在 VSCode 重选解释器
 - opencode 的 pylsp 配置在 `.opencode/opencode.json`，路径硬编码为 `E:\CodeMission\MrAutoDJ\.venv\Scripts\python.exe`——换机器需同步修改
 - 音频设备：sounddevice 在 WSL 下无设备（需 WSLg）；Windows 原生运行
-- **Mimosa 安全钩子**（2026-11-05 实测沉淀）：① Bash 内直接写源码/配置（`sed -i`/`cp`/重定向等）会被 PreToolUse 钩子拒绝——**修改既有文件一律用 edit 类工具精确替换**，钩子借此对候选代码做安全检查；② `git commit` 前钩子自动扫描改动，高危发现会强制拦截（如路径穿越类模式）——修复后重试即可通过，软警告（扫描结论不完整）按兼容策略放行但不得宣称"项目安全"；③ 补跑完整扫描用 Mimosa 扫描工具，报告落仓库外
+- **Mimosa 安全钩子**（2026-11-05 实测沉淀）：① Bash 内直接写源码/配置（`sed -i`/`cp`/重定向等）会被 PreToolUse 钩子拒绝——**修改既有文件一律用 edit 类工具精确替换**，钩子借此对候选代码做安全检查；② `git commit` 前钩子自动扫描改动，高危发现会强制拦截（如路径穿越类模式）——修复后重试即可通过，软警告（扫描结论不完整）按兼容策略放行但不得宣称"项目安全"；③ 补跑完整扫描用 Mimosa 扫描工具，报告落仓库外——**PL008.9 首次完整 deep scan 已完成（2026-11-08）：0 发现，依赖 593 包扫描完成，seal sha256:67263c718443b163e30936b59ba54cf417855e75bb32543c9229399f8c05c9b9**
 - 探针/验证脚本对音频设备有依赖（VU 采集、输出流）——设备被占用或瞬时不可用会出现偶发 FAIL，先复跑一次排除设备争用再判代码回归
 - **Node/Rust 工具链**（PL003 起前端迁移依赖）：webui 需 Node ≥20 + npm；shell 壳需 Rust ≥1.77 + cargo（Tauri 2 依赖 WebView2，Win10/11 自带）。`webui/node_modules`、`shell/node_modules`、`shell/src-tauri/target` 均不入库；换机器后 `webui/`、`shell/` 各自 `npm install` 重建，Rust 依赖由 cargo 首次构建自动拉取
 
@@ -101,6 +101,7 @@
 - 渲染进度回调异常静默忽略（FIX005/S2 登记，stretcher `_safe_progress`）：场景——rubberband 渲染的进度回调（UI 层注入）抛错；降级行为——异常吞掉、渲染本体照常完成；理由——进度显示是装饰层，回调失败不得杀死渲染线程
 - WS 网关慢客户端丢 tick 帧（PL003 登记，gateway `_tick_loop`/`_respond`）：场景——客户端消费慢于 30Hz 推流、出站队列（64 帧）满；降级行为——tick 帧静默丢弃（状态可自愈，下一帧即最新），推送时钟落后超一个周期重对齐防雪崩，RPC 响应不丢（满时记 warning）；理由——状态推流是装饰层，丢帧优于阻塞推流拖垮全部客户端
 - WS 网关无 cmd 入站帧静默忽略（PL003 登记，gateway `_on_message`）：场景——非 RPC 噪声帧/未来协议扩展帧；降级行为——忽略不回错误；理由——协议向前兼容（后续事件订阅等帧型无需回错误），坏 JSON 仍有 `bad_json` 错误帧不在此列
+- WS 网关 tick 推流崩溃自动重启（PL008.5 登记，gateway `_on_tick_done`/`_restart_tick_loop`）：场景——`_tick_frame` 组帧抛异常致推流任务死亡（如引擎状态字段形态变化）；降级行为——指数退避自动重建（0.5s×2 上限 8s）+ 广播 `gateway_event`（tick_restart/tick_dead）事件帧，10s 窗 3 连崩放弃重启；理由——推流是装饰层（RPC 主业务不受影响），自愈优于推流永久断流，限次防崩溃风暴
 - **容错登记制**（2026-11-05 对齐 CapsulePulse）：以上降级条目即本项目的容错白名单——**新增任何静默兜底/降级必须先在此登记**，写明场景、降级行为与理由三要素；未登记的静默吞错一律按规范违反处理（错误要么向上传播、要么明确记录）
 
 ### 函数注释规则

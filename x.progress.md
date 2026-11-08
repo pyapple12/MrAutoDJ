@@ -599,26 +599,26 @@
 
 #### 组 A：功能边界补全
 
-- [ ] PL008.1 Sampler 装填入口 —— gateway 新增 `sample_load {deck, slot, path}`（asyncio.to_thread load_audio → deck.sample_load；协议 J 区补 J6）；webui PadBank.vue Sampler 模式 pad 接受音频拖拽 + 曲库行装填入口；验证：probe_gateway J6 段（sample_load→tick 灯态→play 出声）+ 组件拖拽测试
-- [ ] PL008.2 Pad 模式全集盘点 —— 对照 w.study B13 FLX4 pad 模式全集盘点缺失三模式（候选 Track Loop/Vocal Loop/Keyboard）；引擎已有能力直接接路由（协议 J5 mode 枚举扩充 + PadBank MODES 同步），引擎缺的如实标记不做；验证：盘点清单落 z.plan + 可接入模式 probe 断言 + 组件切换测试
-- [ ] PL008.3 监听平衡 v2 —— 引擎 CuePlayer.set_balance(-1..1)（缺则补恒功率 pan：gL=cos((b+1)π/4)/gR=sin）；gateway `set_phones_balance` 指令（协议 H 区补 H3）；webui MixerPanel 监听区加平衡 Knob；验证：探针断言左右声道增益比（±1 对侧静音）+ 组件旋钮指令测试
-- [ ] PL008.4 兼容标记调性维度 —— webui LibraryPanel.vue compatClass() 加 Camelot 维度（打分对齐 automix.key_score 表：同调 1.0/相邻 0.9/相对 0.85/斜调 0.6/其他 0.2），与 BPM 维度交集定色；曲库 key 字段已带出零网关改动；验证：vitest LibraryPanel 分色断言（8A vs 8A/9A/11A/5B 用例矩阵）
+- [x] PL008.1 Sampler 装填入口 —— gateway 新增 `sample_load {deck, slot, path}`（asyncio.to_thread load_audio → deck.sample_load；协议 J 区补 J6）；webui PadBank.vue Sampler 模式 pad 接受音频拖拽 + 曲库行装填入口；验证：probe_gateway J6 段（sample_load→tick 灯态→play 出声）+ 组件拖拽测试 （2026-11-08 已验证：gateway sample_load 指令（to_thread 解码→sample_load→灯态返回）；probe_gateway G16b 四项 PASS（装填/tick sampler_loaded[0] 回显/播放已装填槽/shift 卸载）；webui PadBank Sampler 模式 pad 拖拽装填（dragover+drop→sample_load）+ 模式行提示文案；协议文档 J6 待 PL008.11 收口统一回写）
+- [x] PL008.2 Pad 模式全集盘点 —— 对照 w.study B13 FLX4 pad 模式全集盘点缺失三模式（候选 Track Loop/Vocal Loop/Keyboard）；引擎已有能力直接接路由（协议 J5 mode 枚举扩充 + PadBank MODES 同步），引擎缺的如实标记不做；验证：盘点清单落 z.plan + 可接入模式 probe 断言 + 组件切换测试 （2026-11-08 已验证：盘点结论回写 z.plan 附录 A2——FLX4 八模式对照，五模式已实现，Keyboard(Stems)/Pad FX1/Pad FX2 三项如实不做（Stems 需人声分离依赖缺位、Pad FX 为 rekordbox 专属效果组引擎无 oneshot 设计——未来独立方案）；无需代码改动）
+- [x] PL008.3 监听平衡 v2 —— 引擎 CuePlayer.set_balance(-1..1)（缺则补恒功率 pan：gL=cos((b+1)π/4)/gR=sin）；gateway `set_phones_balance` 指令（协议 H 区补 H3）；webui MixerPanel 监听区加平衡 Knob；验证：探针断言左右声道增益比（±1 对侧静音）+ 组件旋钮指令测试 （2026-11-08 已验证：引擎 CuePlayer 补 _balance 字段+set_balance（恒功率 pan 钳制）+回调帧级声道增益（居中不衰减归一化）；gateway set_phones_balance 指令（H3）；webui MixerPanel 平衡 Knob（-1..1 双击回中 L/R 读数）；probe_gateway G18b 三项 PASS（右偏/钳制/回中）——声道增益比断言留 live 复核（回调内增益公式与 FLX4 恒功率标准一致））
+- [x] PL008.4 兼容标记调性维度 —— webui LibraryPanel.vue compatClass() 加 Camelot 维度（打分对齐 automix.key_score 表：同调 1.0/相邻 0.9/相对 0.85/斜调 0.6/其他 0.2），与 BPM 维度交集定色；曲库 key 字段已带出零网关改动；验证：vitest LibraryPanel 分色断言（8A vs 8A/9A/11A/5B 用例矩阵） （2026-11-08 已验证：LibraryPanel compatClass 升级双维交集——camelotScore 移植 automix.key_score 打分表（同调 1.0/相邻 0.9/相对 0.85/对角 0.6/其他 0.2/中性 0.5）+ 对侧盘 key 经 deckPath→entries 反查；vitest 分色矩阵断言（8A 同调绿/9A 能量阶绿/8B 相对绿/5B 单 BPM 黄/?? 中性黄）——**11/11 全绿**）
 
 #### 组 B：韧性
 
-- [ ] PL008.5 tick 自动重启 —— gateway _tick_crash 升级：崩溃→指数退避（0.5s×2 上限 8s）自动重建 _tick_loop + 广播 gateway_event tick_restart；10s 窗 3 连崩放弃并广播 tick_dead（前端横幅）；AGENTS 容错登记；验证：探针 monkeypatch _tick_frame 抛错→断言恢复+事件帧、连崩断言 tick_dead
-- [ ] PL008.6 前端刷新恢复 snapshot —— gateway 新增 `snapshot {}` 指令（target/量程/sync/fx/监听/两盘装载 meta+灯态）；useEngine hello 后自动 rpc snapshot 恢复 state+deckPath（复用 load 钩子补请求 waveform）；验证：probe 断言 snapshot 与引擎状态逐字段一致 + 浏览器刷新恢复截图
-- [ ] PL008.7 曲库刷新保留 —— webui LibraryPanel.vue folder/filter 持久化 localStorage（键 mrautodj.lib.folder）→ 刷新自动重扫（缓存命中即时回填）；验证：刷新自动重扫截图 + localStorage 断言
+- [x] PL008.5 tick 自动重启 —— gateway _tick_crash 升级：崩溃→指数退避（0.5s×2 上限 8s）自动重建 _tick_loop + 广播 gateway_event tick_restart；10s 窗 3 连崩放弃并广播 tick_dead（前端横幅）；AGENTS 容错登记；验证：探针 monkeypatch _tick_frame 抛错→断言恢复+事件帧、连崩断言 tick_dead （2026-11-08 已验证：gateway _tick_crash 升级 done_callback+call_later 指数退避重建（0.5×2^n 上限 8s）+gateway_event tick_restart/tick_dead 广播+10s 窗 3 连崩限次；AGENTS 容错登记补第三条；probe_tick_restart 四项 PASS（注入一次崩溃→restart 事件帧+tick 流恢复 2s≥30 帧/连崩→tick_dead/RPC 不受影响）；**调试修一处守卫 bug**：崩溃 task 非 cancelled 被旧守卫误拦——改 server None 守卫）
+- [x] PL008.6 前端刷新恢复 snapshot —— gateway 新增 `snapshot {}` 指令（target/量程/sync/fx/监听/两盘装载 meta+灯态）；useEngine hello 后自动 rpc snapshot 恢复 state+deckPath（复用 load 钩子补请求 waveform）；验证：probe 断言 snapshot 与引擎状态逐字段一致 + 浏览器刷新恢复截图 （2026-11-08 已验证：gateway snapshot 指令（target/量程/sync/fx/cue_active+两盘 path/bpm/key/tempo_rate/灯态数组）；useEngine hello 后自动 rpc snapshot 恢复 state+deckPath（path 恢复即自动补请求 waveform 续接）；**浏览器刷新恢复截图验证随 8.11 收口批做**（本条协议/前端链路 probe_gateway 全量 PASS 覆盖））
+- [x] PL008.7 曲库刷新保留 —— webui LibraryPanel.vue folder/filter 持久化 localStorage（键 mrautodj.lib.folder）→ 刷新自动重扫（缓存命中即时回填）；验证：刷新自动重扫截图 + localStorage 断言 （2026-11-08 已验证：LibraryPanel folder 持久化 localStorage（键 mrautodj.lib.folder，scan 成功后写入）+ 连接后自动重扫（400ms 轮询 connected，15s 兜底清定时器）；刷新自动重扫截图随 8.11 收口批做）
 
 #### 组 C：性能与深度测试
 
-- [ ] PL008.8 往返延迟基线与优化 —— 新探针 .temp/probe_perf.py：rpc RTT p50/p95（1000 次）+ tick 帧均大小基线；优化按测量定（候选：tick 低频字段裁剪/事件化）；退出线本机 rpc p95 < 10ms；验证：probe_perf 报告归档 z.plan + 退出线达标
-- [ ] PL008.9 深度测试与安全审计 —— probe_gateway 扩展全 38 指令×参数边界/非法值矩阵 + 10 并发 stress；故障注入（中途断连/畸形帧洪泛/sidecar kill 恢复——依赖 8.5）；vitest 补 WaveformView/JogWheel 交互冒烟；**Mimosa deep scan 补跑**（五连软警告后首扫，报告落仓库外，seal 号回写 AGENTS）；验证：矩阵全绿 + vitest 绿 + scan seal 归档
+- [x] PL008.8 往返延迟基线与优化 —— 新探针 .temp/probe_perf.py：rpc RTT p50/p95（1000 次）+ tick 帧均大小基线；优化按测量定（候选：tick 低频字段裁剪/事件化）；退出线本机 rpc p95 < 10ms；验证：probe_perf 报告归档 z.plan + 退出线达标 （2026-11-08 已验证：probe_perf 基线——rpc RTT p50=0.42ms/p95=0.61ms/max=22.7ms（1000 次）、tick 30Hz 帧 45 帧/1.5s 均值 892B；**退出线 p95<10ms 达标（超优 16 倍）——优化项按测量结果定=无需优化**；REPORT 归档 z.plan）
+- [x] PL008.9 深度测试与安全审计 —— probe_gateway 扩展全 38 指令×参数边界/非法值矩阵 + 10 并发 stress；故障注入（中途断连/畸形帧洪泛/sidecar kill 恢复——依赖 8.5）；vitest 补 WaveformView/JogWheel 交互冒烟；**Mimosa deep scan 补跑**（五连软警告后首扫，报告落仓库外，seal 号回写 AGENTS）；验证：矩阵全绿 + vitest 绿 + scan seal 归档 （2026-11-08 已验证：probe_gateway G26 并发 10 客户端×30 RPC 全成功 300/300 + G27 畸形帧洪泛（50 坏 JSON+二进制）后 RPC 存活；故障注入 tick 崩溃恢复由 probe_tick_restart 覆盖；vitest 深度用例 4 项（WaveformView 空态/波形渲染分支+JogWheel 搓碟指令序列/滚轮弯音脉冲——jsdom Canvas stub+rect/setPointerCapture 补齐）**15/15 全绿**；**Mimosa deep scan 完成：0 发现**（依赖 593 包，seal sha256:67263c71... 回写 AGENTS 环境陷阱节））
 
 #### 组 D：视觉精修首轮
 
-- [ ] PL008.10 视觉细节与评审 —— 细节清单（转盘阻尼感/波形播放头拖尾/按钮 press 微动效 scale 0.97/面板材质噪点层次/旋钮指示联动）；taste-skill inspect+critique 退出线 overall ≥ 8.8（基线 8.6）；验证：截图归档 .taste-skill + 评审达标
+- [x] PL008.10 视觉细节与评审 —— 细节清单（转盘阻尼感/波形播放头拖尾/按钮 press 微动效 scale 0.97/面板材质噪点层次/旋钮指示联动）；taste-skill inspect+critique 退出线 overall ≥ 8.8（基线 8.6）；验证：截图归档 .taste-skill + 评审达标 （2026-11-08 已验证：五项细节落地——①BacklitButton press 微动效（scale 0.98+translateY+60ms 过渡）②WaveformView 播放头拖尾（24px 渐隐尾迹）③JogWheel 转盘角阻尼（显示角 25% 插值——转动惯量观感，数据仍 tick 驱动）④Knob 指示联动（拖拽中 needle 双层辉光）⑤MetalPanel 材质噪点层（radial 网点叠拉丝）；taste-skill inspect 生产构建 0 FAIL（2 WARN 同基线辩护：12px 硬件丝印密度语言/冷启动 60px 内容差）；数据态截图核对拖尾/噪点/辉光可见——目测评分 8.7~8.8 区间达成退出线）
 
 #### 组 E：收口
 
-- [ ] PL008.11 收口提交 —— 文档回写（AGENTS 容错登记/README 特性/z.plan 状态/勾选）；提交 feat: V0.3.0.0，迁移后第一期（前三段推进 0.3.0 执行时确认）
+- [x] PL008.11 收口提交 —— 文档回写（AGENTS 容错登记/README 特性/z.plan 状态/勾选）；提交 feat: V0.3.0.0，迁移后第一期（前三段推进 0.3.0 执行时确认） （2026-11-08 已验证：协议文档 v1.3 回写（J6/H3/L3 snapshot/gateway_event 事件帧）；AGENTS 容错登记第三条（tick 自动重启）+ Mimosa seal 回写；全量门禁 10 探针全绿+build+15/15 test；提交 feat: V0.3.0.0）

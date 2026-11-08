@@ -1565,6 +1565,7 @@ class CuePlayer:
         self._dead: bool = False
         self._channels = channels
         self._volume: float = 1.0
+        self._balance: float = 0.0  # PL008.3：监听平衡 -1..1（恒功率 pan）
         self._play_rate = samplerate
         try:
             self._stream = sd.OutputStream(
@@ -1603,6 +1604,12 @@ class CuePlayer:
         # 监听增益 [0,1]（无 boost，护耳）
         with self._lock:
             self._volume = max(0.0, min(1.0, v))
+
+    def set_balance(self, b: float) -> None:
+        # 监听平衡（PL008.3 v2）：恒功率 pan，-1=全左 / 0=居中 / +1=全右；
+        # 帧级增益分配（gL=cos, gR=sin，居中恒 0.707→回调归一化保持总响度）
+        with self._lock:
+            self._balance = max(-1.0, min(1.0, float(b)))
 
     @property
     def position_seconds(self) -> float:
@@ -1662,6 +1669,13 @@ class CuePlayer:
                     self._pos += frames
                 if self._volume != 1.0:
                     outdata *= self._volume
+                # 平衡（PL008.3）：恒功率 pan 帧级声道增益（居中不衰减）
+                if self._balance != 0.0:
+                    b = self._balance
+                    gl = np.cos((b + 1) * np.pi / 4) / 0.7071
+                    gr = np.sin((b + 1) * np.pi / 4) / 0.7071
+                    outdata[:, 0] *= gl
+                    outdata[:, 1] *= gr
         except Exception:
             self._dead = True
             try:

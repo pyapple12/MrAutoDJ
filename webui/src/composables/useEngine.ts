@@ -177,6 +177,40 @@ export function useEngine() {
       state.connected = true
       state.reconnecting = false
       retryMs = 500
+      // 刷新恢复（PL008.6）：hello 后自动拉快照——恢复 target/fx/sync/量程/装载
+      // meta 与灯态；deckPath 恢复触发波形自动续接（经 waveFor 消费方）
+      void rpc('snapshot').then((s) => {
+        const snap = s as {
+          target: string
+          tempo_range: Record<string, number>
+          sync: Record<string, boolean>
+          fx: FxState
+          cue_active: string | null
+          decks: Record<string, { path: string; bpm: number; key: string; tempo_rate: number; key_shift: number; keylock: boolean; loop: boolean; slip: boolean; hot_cues: boolean[]; sampler_loaded: boolean[] }>
+        }
+        state.target = snap.target
+        Object.assign(state.tempo_range, snap.tempo_range)
+        Object.assign(state.sync, snap.sync)
+        Object.assign(state.fx, snap.fx)
+        state.cue_active = snap.cue_active
+        for (const d of ['a', 'b'] as const) {
+          const dk = snap.decks[d]
+          if (!dk) continue
+          Object.assign(state[d], {
+            tempo_rate: dk.tempo_rate,
+            key_shift: dk.key_shift,
+            keylock: dk.keylock,
+            loop: dk.loop,
+            slip: dk.slip,
+            hot_cues: dk.hot_cues,
+            sampler_loaded: dk.sampler_loaded,
+          })
+          if (dk.path) {
+            state.deckPath[d] = dk.path
+            void rpc('waveform', { path: dk.path }) // 波形续接（PL008.6）
+          }
+        }
+      }).catch(() => {})
       return
     }
     if (msg.type === 'tick') {
