@@ -1,6 +1,6 @@
 # MrAutoDJ 源码研读任务清单（x.progress.md）
 
-> 目标：通读 12 个参考仓库，提炼本项目（Python 虚拟 DJ 台 → AI 自动 DJ → Claude 电台）可借鉴的
+> 目标：通读 12 个参考仓库，提炼本项目（Python 虚拟 DJ 台 → AI 自动 DJ；原第三步 Claude 电台已取消，2026-11-08 定案）可借鉴的
 > 代码结构、文件分类规范、代码规范、错误处理规范，逐步产出报告至 `w.study.md`。
 
 > **任务清单纪律**（2026-11-05 定案，对齐 CapsulePulse；细则见 AGENTS.md 同名节）：

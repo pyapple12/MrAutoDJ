@@ -1,6 +1,6 @@
 # MrAutoDJ 项目说明
 
-Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/横推）→ AI 自动 DJ（调和混音/自动转场/Set 规划）→ Claude 电台（LLM 报幕 + 点歌互动）。GUI 用 PySide6，中文注释为主。验证以无头探针（`.temp/probe_*.py`）全量回归 + 冒烟 import 为门禁，无独立 lint 脚本与构建步骤。
+桌面 DJ 应用（Tauri 2 壳 + Vue3 Web 前端 + Python sidecar），两大里程碑已收官：虚拟 DJ 台（双打碟机/波形/EQ/横推）+ AI 自动 DJ（调和混音/自动转场/Set 规划）；原第三步 Claude 电台已取消（2026-11-08 定案）。架构：`webui/`（Vue3+TS 拟物前端）↕ WebSocket（协议见 docs/ipc_protocol.md）↕ `modules/gateway.py` sidecar（sounddevice 实时引擎）；`shell/` Tauri 壳零业务。中文注释为主。验证以引擎/协议探针八件（`.temp/probe_*.py`）+ 冒烟 import + webui build/test 为门禁，无独立 lint 脚本。
 
 > **文档分工**（2026-11-05 对齐 CapsulePulse 规范）：进度与任务清单看 `x.progress.md`、方案与审计归档看 `z.plan.md`、问题备忘看 `y.problem.md`、源码研读沉淀看 `w.study.md`；本文件不承担项目状态行职责。
 
@@ -8,7 +8,7 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 
 - 入口 `main.py`：WS 网关 sidecar 为默认模式（PL007 起；`--gui` 打印退役提示，旧栈在 `.archived/ui-0.2.8/`）；桌面完整形态 = `shell/` tauri dev（壳 spawn 网关 + webui 前端）；版本单一来源在 `config/static/base.json` 的 `version` 字段（三段式 `X.Y.Z`），其他模块用 `get_static_config().base["version"]` 引用
 - **提交前全量门禁（硬性工作流，PL007.3 起新体系）**：改动涉及 `modules/`、`webui/`、`utils/`、`config/` 的提交，提交前必须跑——① 引擎/协议探针 8 个逐个 PASS：`.temp/` 下 `probe_engine / probe_m15 / probe_p1 / probe_pl002_score / probe_pl002_set / probe_gateway / probe_gateway_audio / probe_pl007_gate`（真引擎出声类在设备占用时复跑一次再判）；② 冒烟 import（下方清单）；③ webui 改动加 `npm run build`（vue-tsc 门禁）+ `npm test`（vitest 基线）；④ 涉及视觉的出截图核对。不通过不得宣称完成，环境缺依赖先报告用户、不得静默跳过。退役探针（PySide6 UI 层 28 个）随旧栈归档于 `.archived/probes/`——其行为断言已由协议探针承接（pad/TEMPO/循环/表演键→pl007_gate G9-G17；波形/分析/曲库→gateway G21-G25+gateway_audio A7）
-- 没有测试/lint 命令。改动后验证（冒烟 import 清单——PL007.2 起去 ui.*，新增模块须同步回填）：`.\.venv\Scripts\python.exe -c "import main, modules.engine, modules.gateway, modules.waveform_data, modules.analyzer, modules.library, modules.automix, modules.radio, modules.stretcher, modules.transition, modules.transition_manager, config.settings, config.static.static_config, utils.logger, utils.file_utils, utils.retry, utils.convert, utils.audio_decode"`。涉及解码链路（pydub 为延迟导入，import 冒烟测不出）另跑真实解码断言：合成 wav → `decode_audio` 查幅度
+- 没有测试/lint 命令。改动后验证（冒烟 import 清单——PL007.2 起去 ui.*，PL007 后去 radio，新增模块须同步回填）：`.\.venv\Scripts\python.exe -c "import main, modules.engine, modules.gateway, modules.waveform_data, modules.analyzer, modules.library, modules.automix, modules.stretcher, modules.transition, modules.transition_manager, config.settings, config.static.static_config, utils.logger, utils.file_utils, utils.retry, utils.convert, utils.audio_decode"`。涉及解码链路（pydub 为延迟导入，import 冒烟测不出）另跑真实解码断言：合成 wav → `decode_audio` 查幅度
 - GUI 无头验证已随 PySide6 退役移除（PL007.2；旧栈完整副本与 UI 探针在 `.archived/`）
 - 架构迁移三件套（PL003 起）：WS 网关 `.\.venv\Scripts\python.exe -m modules.gateway`（`--fake` 无设备；stdout 输出 `gateway ready port=<N>` 就绪握手行，协议权威文档 `docs/ipc_protocol.md`；`main.py` 为等价转发入口）；webui 前端 `webui/`（`npm run dev` 开发 / `npm run build` 含 vue-tsc 类型检查门禁 / `npm test` vitest 基线）；Tauri 壳 `shell/`（`npm run dev` = tauri dev，需先起 webui dev server；`cargo build` 在 `shell/src-tauri/` 单独编译验证）
 - 依赖（`requirements.txt`）：sounddevice、numpy、librosa、websockets 等（PL007.2 起 PySide6 已剥离；见 z.plan.md 技术栈）
@@ -24,7 +24,7 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 
 ## 结构与约定
 
-- 包结构按依赖单向分层（参考 mrboard / AccelWorld）：`utils/` 通用工具（logger/file_utils/retry/convert，无业务依赖）→ `config/` 配置 → `modules/` 业务核心（engine 音频引擎、analyzer 曲目分析、library 曲库、automix AI 编排、radio 电台调度，无 GUI 依赖）→ `ui/` 界面（main_window 主窗口、deck_widget 打碟机、waveform_widget 波形、themes 主题 QSS）→ `data/` 静态数据
+- 包结构按依赖单向分层（参考 mrboard / AccelWorld）：`utils/` 通用工具（logger/file_utils/retry/convert，无业务依赖）→ `config/` 配置 → `modules/` 业务核心（engine 音频引擎、analyzer 曲目分析、library 曲库、automix AI 编排、gateway WS 网关、waveform_data 波形数据，无 GUI 依赖）→ `webui/` 前端（Vue3+TS：composables 协议层 / components 面板 / components/skeuo 拟物库）+ `shell/` Tauri 壳（Rust 零业务）→ `data/` 静态数据；旧 `ui/`（PySide6）已退役归档 `.archived/ui-0.2.8/`（PL007）
 - `config/` 配置分两类（对齐 mrboard）：
   - **静态配置**（`config/static/`，只读，json 驱动）：`static_config.py` 加载器 + `config.json` 引导映射表 + `base.json`（应用参数：版本/采样率/块大小/缓存路径等）+ `ui.json`（UI 参数：颜色/阈值/表头）；模块顶层 `_SC = get_static_config()` 一次性解包，运行时零 IO
   - **用户配置**（`config/settings.py`，可读写）：AppConfig dataclass，存项目内 `config/user_config.json`（路径由 base.json `user_config_path` 指定）
@@ -116,7 +116,7 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 ### 代码约定
 
 - 注释必须用 `#`，禁止 `//` 或其他语言注释符号；所有注释使用中文
-- **正式程序文件（main.py 及 modules/、ui/、utils/、config/ 下的 .py）的注释中禁止出现任何与 `.reference/` 相关的参考标注**（如"参考：.reference/…"、"照抄自…"等）；参考来源信息只允许写在 `.temp/` 临时脚本或文档（w.study.md / x.progress.md）中
+- **正式程序文件（main.py 及 modules/、webui/、shell/、utils/、config/ 下的源码）的注释中禁止出现任何与 `.reference/` 相关的参考标注**（如"参考：.reference/…"、"照抄自…"等）；参考来源信息只允许写在 `.temp/` 临时脚本或文档（w.study.md / x.progress.md）中
 - 命名风格：函数/变量用 `snake_case`，类用 `CamelCase`，常量用 `UPPER_CASE`
 - `_` 前缀：函数名前加 `_` 表示模块内部私用，如 `_format_tokens()`，外部模块不应直接调用
 - `def main()`：每个可独立运行的脚本都有 `main()` + `if __name__ == "__main__": main()`

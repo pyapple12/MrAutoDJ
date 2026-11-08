@@ -141,7 +141,7 @@
 | dj-track-similarity | 3★    | embedding 相似度选曲     |
 | cuekey              | 2★    | Camelot/BPM/能量分析     |
 
-### M3 Claude 电台
+### ~~M3 Claude 电台~~（已取消，2026-11-08 用户定案"暂不做了"——radio.py 占位与本章规划移除；研读存档 B7/B9/B10/B11 保留供未来重启参考）
 
 | 项目        | Stars | 价值                               |
 | ----------- | ----- | ---------------------------------- |
@@ -155,7 +155,7 @@
 
 1. M1 深读 songs-automixer_python
 2. M2 看 pyCrossfade 渐变 + ai-remixmate 转场
-3. M3 看 radio-dj 架构 + mixx-dj-mcp 控制层
+3. ~~M3 看 radio-dj 架构 + mixx-dj-mcp 控制层~~（已取消）
 
 ---
 
@@ -252,12 +252,7 @@ MrAutoDJ：从虚拟 DJ 台起步，逐步演进为 AI 自动 DJ 与 LLM 电台�
   - [x] 调和混音（Camelot 轮盘）选曲与 Set 规划（同艺人约束/去重/能量弧线）
   - [x] 节拍对齐自动转场：prepare/mix 管线接入 AI 调度（EQ 渐变 + 下拍触发）
   - [x] 自动 Set 规划：贪心编排 + 能量曲线 + 可解释评分（explanation/warnings）
-- [ ] **M3 第三步：Claude 电台**
-  - [ ] 引擎暴露控制接口（HTTP/MCP，portmanteau 工具模式）
-  - [ ] 混合播放队列（song/tts/silence 顺序播放）
-  - [ ] Claude API 工具调用（选歌/接歌/报幕，确定性回退绝不静默）
-  - [ ] 点歌互动（状态机 NEW→ACCEPTED→PLAYING→PLAYED）
-  - [ ] TTS 语音报幕（多引擎可插拔 + 去 emoji）
+- ~~**M3 第三步：Claude 电台**~~（已取消，2026-11-08 用户定案"暂不做了"——引擎控制/混合队列/API 工具调用/点歌/TTS 五项规划移除；重启时从 git 历史与 w.study 研读恢复）
 
 ## 参考项目（来自上文调研）
 

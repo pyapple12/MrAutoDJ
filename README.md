@@ -8,11 +8,12 @@
 
 ## 项目简介
 
-桌面 DJ 应用（Tauri 2 + Web 前端 + Python sidecar），三步路线：
+桌面 DJ 应用（Tauri 2 + Web 前端 + Python sidecar），两大里程碑已收官：
 
 1. **虚拟 DJ 台**：双打碟机、波形显示、三频 EQ、横推混音、变速与 Keylock
 2. **AI 自动 DJ**：调和混音（Camelot）、节拍对齐自动转场、Set 规划
-3. **Claude 电台**：LLM 自动报幕与接歌、直播间点歌互动
+
+原规划的第三步 Claude 电台已取消（2026-11-08 定案）。
 
 架构（V0.2.9 起）：`shell/` Tauri 2 壳（零业务）→ `webui/` Vue3+TS 拟物前端 → WebSocket（38 条指令 + 30Hz 推流 + 二进制波形帧，协议见 `docs/ipc_protocol.md`）→ `modules/gateway.py` sidecar（音频引擎 python-sounddevice 实时回调，分析 librosa）。旧 PySide6 栈已退役归档（`.archived/ui-0.2.8/`）。
 
@@ -62,16 +63,13 @@
   - 兼容性评分：BPM 八度折叠 + Camelot 调和轮盘打分表 + 能量曲线 + 音色谱概要（三维归一），加权聚合可解释（explanation/warnings）
   - Set 规划：贪心链 + 能量弧线（开场→峰→回落配置化）+ 同艺人间隔约束 + 去重
   - 自动转场：复用 M1.7 转场管线（skip-stretch/下拍对齐）+ 转场 EQ 渐变（low-cut 交接）+ AUTO 自动接歌模式（Mix 完成自动装填下一曲，手动操作即退出）
-  - UI：Effects 推荐区（推荐曲名 + 理由 + NEXT 单步 + AUTO 开关）
-- **AI 自动 DJ（M2）**：
-  - 调和混音（Camelot 轮盘）选曲
-  - 节拍对齐自动转场（EQ 渐变）
-  - 自动 Set 规划 / 能量曲线
-- **Claude 电台（M3）**：
-  - 引擎控制接口（HTTP/MCP）
-  - Claude 自动选歌 / 接歌 / 报幕
-  - 点歌互动（直播间消息入口）
-  - TTS 语音报幕
+  - 调和混音（Camelot 轮盘）选曲 / 节拍对齐自动转场 / 自动 Set 规划与能量曲线
+- **UI 架构迁移（V0.2.8.0-V0.2.9.0，当前形态）**：
+  - Tauri 2 壳（Rust 零业务）+ Vue3+TS 拟物前端（skeuo 组件库/Canvas 转盘波形/双主题）+ Python sidecar（WS 网关：38 条指令 + 30Hz 状态推流 + 二进制波形帧 + 事件帧流）
+  - 数据层 Web 化：虚拟滚动曲库（扫描/分析进度实时回填）、波形峰值单源管线、Automix 推荐/AUTO/MIX 全激活
+  - 工程体系：真引擎端到端签收探针、vitest 基线、PySide6 旧栈退役归档
+
+> 原规划的 Claude 电台（M3：LLM 报幕/点歌/TTS）已取消（2026-11-08 定案），研读存档见 w.study.md B7/B9/B10/B11。
 
 ## 快速开始
 
@@ -143,8 +141,7 @@ MrAutoDJ/
 │   ├── transition.py          # 转场规划（八度折叠 / skip-stretch 判定）
 │   ├── stretcher.py           # 变速/变调预渲染（rubberband 封装）
 │   ├── transition_manager.py  # 转场编排（prepare/mix_now/Key Shift 预渲染）
-│   ├── automix.py             # AI 自动编排：兼容性评分 / 转场计划 / Set 规划
-│   └── radio.py               # 电台调度：LLM 导演 / 混合播放队列 / 点歌（暂缓）
+│   └── automix.py             # AI 自动编排：兼容性评分 / 转场计划 / Set 规划
 ├── config/
 │   ├── settings.py            # 用户配置读写（AppConfig，config/user_config.json）
 │   └── static/                # 静态配置（只读，json 驱动）
@@ -159,8 +156,7 @@ MrAutoDJ/
 │       └── components/skeuo/  # 拟物组件库（MetalPanel/BacklitButton/Knob/Fader/VuMeter/MiniDisplay/JogWheel）
 ├── shell/                     # Tauri 2 壳（Rust 零业务：spawn sidecar + 端口握手 + 退出清理）
 ├── docs/
-│   ├── ipc_protocol.md        # WS 协议 v1.2 权威定义（38 条指令/事件帧/二进制峰值帧）
-│   └── ui_layout.md           # 旧栈布局规格（历史）
+│   └── ipc_protocol.md        # WS 协议 v1.2 权威定义（38 条指令/事件帧/二进制峰值帧）
 ├── tools/
 │   ├── gen_webui_tokens.py    # ui.json → tokens.css 设计 token 生成器（双主题单源）
 │   └── rubberband/            # 内置变速引擎（GPL 便携构建，兜底方案，随仓库分发）
@@ -173,10 +169,9 @@ MrAutoDJ/
 ├── .archived/                 # 退役归档（ui-0.2.8 旧栈 + PySide6 探针，gitignore 不入库）
 ├── .reference/                # 参考仓库与硬件资料（外部 clone，不纳入版本控制）
 ├── z.plan.md                  # 项目规划与里程碑（含全量代码审计报告附录）
-├── w.study.md                 # 源码研读报告（含 B13 FLX4 学习报告）
-├── x.progress.md              # 任务清单（D/E/F/G/H/I 系列）
-├── y.problem.md               # 已知问题记录（P1-P4）
-├── docs/ui_layout.md          # 布局规格单（FLX4 四区 ASCII + 部件表）
+├── w.study.md                 # 参考仓库研读报告（B1-B13 外部项目 + FLX4 学习报告）
+├── x.progress.md              # 任务清单（三线 PL/FIX/PATCH + 历史字母系列）
+├── y.problem.md               # 已知问题记录（P1-P5 全部修复闭环，待修复区空）
 ├── requirements.txt           # Python 依赖列表
 ├── LICENSE                    # MIT 许可证
 └── README.md                  # 本文件
@@ -206,7 +201,7 @@ Pitch 变速与 Keylock（变调不变速）依赖 Rubber Band 变速引擎。�
 |                             | `sample_rate` / `block_size` / `channels` | 音频引擎参数               |
 |                             | `analysis_sample_rate` / `analysis_hop`   | 分析路径参数               |
 |                             | `cache_path` / `user_config_path`         | 缓存与用户配置路径         |
-| `config/static/ui.json`     | `colors.*` / 阈值 / 表头                  | UI 外观与阈值              |
+| `config/static/ui.json`     | `colors.*` / 阈值 / 表头                  | UI 外观与阈值（webui 由 tools/gen_webui_tokens.py 生成为 CSS tokens，双主题单源） |
 
 修改 json 后重启应用生效（`get_static_config()` 缓存单例，进程内只读一次）。
 
@@ -216,15 +211,19 @@ Pitch 变速与 Keylock（变调不变速）依赖 Rubber Band 变速引擎。�
 
 ## 依赖
 
+**Python 侧**（requirements.txt，sidecar 引擎 + 网关）：
+
 | 包名               | 说明                         |
 | ------------------ | ---------------------------- |
-| PySide6            | GUI 框架（Qt6）              |
 | python-sounddevice | 低延迟音频输出（实时回调）   |
 | numpy              | 音频数组计算                 |
 | scipy              | 滤波器（Butterworth biquad） |
 | librosa            | BPM/调性/能量分析            |
 | soundfile          | WAV 读写                     |
 | pydub              | 音频解码（基于 ffmpeg）      |
+| websockets         | WS 网关服务（sidecar）       |
+
+**前端/壳**（各自 npm install）：vue3 + typescript + vite（webui）；@tauri-apps/cli + Rust tauri 2（shell）
 
 ## 参考项目
 
@@ -248,10 +247,6 @@ A：M1 采用预渲染方案，变速渲染依赖 rubberband 引擎。解析顺�
 ### Q3：分析很慢？
 
 A：首次加载会逐曲分析（librosa），结果缓存到本地（SQLite/JSON，带版本号），后续加载秒开。分析失败的单曲以占位记录（bpm=0, key="?"）降级，不影响曲库。
-
-### Q4：M3 的 Claude 电台需要什么？
-
-A：需要 Anthropic API key（或兼容端点）。凭据只存本机（`~/.config/mrautodj/`），不随项目走；LLM 失败时电台自动回退为普通自动混音，绝不静默。
 
 ## 维护者
 

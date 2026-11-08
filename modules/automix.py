@@ -1,5 +1,5 @@
 # AI 自动编排模块：兼容性评分 / Set 规划 / 推荐桥（M2 核心）
-# 设计：确定性编排算法（打分表 + 贪心链，非 LLM——LLM 报幕属 M3 radio.py）；
+# 设计：确定性编排算法（打分表 + 贪心链，非 LLM——可解释够用，KISS）；
 # 纯逻辑零 GUI 依赖（分层红线），TransitionManager 桥经鸭子类型注入（不反向耦合）
 
 from __future__ import annotations
@@ -219,7 +219,7 @@ def _pick_step(
     # 单步选曲：过滤（已播/同艺人间隔）→ 评分（兼容 × 弧线贴合）→ 最高者；
     # 无可用候选返回 None。当前曲 = start（首步）或 sequence[-1]
     if _SAME_ARTIST_GAP <= 1:
-        recent_artists = []  # FIX004/M3：间隔≤1 即无约束（sequence[-0:] 会成全序列；
+        recent_artists = []  # FIX004：间隔≤1 即无约束（sequence[-0:] 会成全序列；
         # start 艺人同样不排除——GAP=1 语义为"紧邻禁重复"已由顺序播放天然满足）
     else:
         recent_artists = [
@@ -347,7 +347,7 @@ class AutomixController:
 #   AutomixController：推荐桥（recommend 单步 / prepare_next 装填（tm.prepare
 #     全复用：skip-stretch 与 downbeat 对齐）/ auto_mode + on_mix_started 链式
 #     自动模式；已播 _played 防自动 Set 循环重复）
-# 设计理由：确定性打分 + 贪心（可解释够用，KISS）——非 LLM（M3 radio.py 职责）；
+# 设计理由：确定性打分 + 贪心（可解释够用，KISS）——非 LLM 路线；
 #   纯逻辑零 GUI 依赖（分层红线）；tm 经鸭子类型注入不反向耦合；
 #   缺失维度中性分（不奖励不惩罚）+ warnings 声明（可解释性）
 # 异常处理：key 解析失败中性；bpm/energy/timbre 缺失中性；plan_set 候选耗尽
