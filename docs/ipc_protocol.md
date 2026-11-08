@@ -1,7 +1,9 @@
-# MrAutoDJ IPC 协议 v1（PL003）
+# MrAutoDJ IPC 协议 v1.1（PL003/PL004）
 
 > Tauri 壳 ↔ Python sidecar 的 WebSocket 协议权威定义。实现：`modules/gateway.py`；
 > 任何协议变更必须先改本文档（版本号递增），再改实现。
+> v1.1（PL004.1）：控制面指令全集（对照 main_window 接线清单），tick 帧扩灯态字段；
+> 均为 v1 内兼容扩展（`protocol_version` 保持 1，见 §7）。
 
 ## 1. 概述
 
@@ -46,20 +48,88 @@
 - `args` 缺省视为 `{}`；必填参数缺失/类型错误 → `bad_args`
 - 未收录指令 → `unknown_cmd`
 
-### 3.1 指令表（v1 共 8 条）
+### 3.1 指令表（v1.1 共 36 条，分区编号对照 UI 区）
 
-| cmd | args | result | 语义（对齐引擎/主窗方法） |
-| --- | --- | --- | --- |
-| `load` | `deck`, `path`, `bpm?` | `{duration: 秒, bpm}` | 解码（线程池）→ 装填播放；`bpm` 提供时 `set_tempo` 对齐 |
-| `play` | `deck` | `{playing}` | 幂等播放：仅 `paused` 时翻转（Deck.pause 为 toggle） |
-| `pause` | `deck` | `{paused}` | 幂等暂停：仅未暂停时翻转 |
-| `cue` | `deck` | `{cue_seconds}` | 设置 CUE 并回到 CUE（先设后回，UI 同款语义） |
-| `seek` | `deck`, `seconds` | `{position: 秒}` | 秒→样本定位；负值钳 0 |
-| `set_volume` | `volume` | `{volume}` | 主音量 0..1（钳制） |
-| `set_xfader` | `position` | `{position}` | 横推 0..1（0=A 全出，1=B 全出，钳制） |
-| `mix` | `deck` | `{triggered}` | 转场触发；v1 未接入转场管理时返回 `not_ready`（协议占位） |
+**传输（T1-T8，对照 Deck 传输区）**
 
-`deck` 取值 `"a"` | `"b"`，非法即 `bad_args`。
+| # | cmd | args | result | 语义 |
+| --- | --- | --- | --- | --- |
+| T1 | `load` | `deck`, `path`, `bpm?` | `{duration, bpm}` | 解码（线程池）→ 装填播放；`bpm` 提供时对齐 |
+| T2 | `play` | `deck` | `{playing}` | 幂等播放（仅 `paused` 时翻转） |
+| T3 | `pause` | `deck` | `{paused}` | 幂等暂停 |
+| T4 | `cue` | `deck` | `{cue_seconds}` | 设置 CUE 并回到 CUE |
+| T5 | `seek` | `deck`, `seconds` | `{position}` | 秒→样本定位（负值钳 0） |
+| T6 | `set_volume` | `volume` | `{volume}` | 主音量 0..2（>1 boost，对齐 UI 域） |
+| T7 | `set_xfader` | `position` | `{position}` | 横推 -1..1（-1=A 全出，0=居中，1=B 全出） |
+| T8 | `mix` | `deck` | `{triggered}` | 转场触发；tm 未注入 → `not_ready` |
+
+**TEMPO / Sync / 循环（D1-D6，对照 Deck 区 TEMPO/Sync/循环键行）**
+
+| # | cmd | args | result | 语义 |
+| --- | --- | --- | --- | --- |
+| D1 | `set_tempo_rate` | `deck`, `rate` | `{rate}` | 乐速倍率（前端按量程换算）；手动变速解除该盘 Sync |
+| D2 | `cycle_tempo_range` | `deck` | `{range, wide, label}` | 量程循环 ±6/±10/±16/WIDE（网关状态） |
+| D3 | `set_sync` | `deck`, `on` | `{synced, rate?, target?}` | Beat Sync 对齐另一盘有效 BPM（钳量程）；BPM 未知 → `bad_state` |
+| D4 | `set_loop` | `deck`, `on` | `{on}` | 循环开关 |
+| D5 | `loop` | `deck`, `action: in/out/halve/double` | `{action, loop_active}` | 循环四动作 |
+| D6 | `beatloop` | `deck`, `beats` | `{beats, bpm}` | 按当前盘 BPM 设拍循环；BPM 未知 → `bad_state` |
+
+**表演键（P1-P5，对照表演键行 + Tap）**
+
+| # | cmd | args | result | 语义 |
+| --- | --- | --- | --- | --- |
+| P1 | `set_keylock` | `deck`, `on` | `{on}` | Keylock 变速不变调（rubberband 后台重渲染） |
+| P2 | `set_key_shift` | `deck`, `semitones` | `{semitones}` | 移调（钳 ±key_shift_max） |
+| P3 | `slip` / `censor` | `deck`, `on` | `{on}` | 滑行 / 消音开关 |
+| P4 | `stutter` | `deck` | `{ok_pressed}` | 结巴重复（按下触发） |
+| P5 | `tap` | `deck` | `{bpm}` | 点按测速（0=未成拍） |
+
+**Mixer（M1-M5，对照 Mixer 区 TRIM/EQ/FaderStart/装载）**
+
+| # | cmd | args | result | 语义 |
+| --- | --- | --- | --- | --- |
+| M1 | `set_pregain` | `deck`, `gain` | `{gain}` | TRIM 前级增益 |
+| M2 | `set_eq` | `deck`, `band: low/mid/high`, `gain` | `{band, gain}` | 三频 EQ |
+| M3 | `fader_start` | `on` | `{on}` | 推子启动开关（全局） |
+| M4 | `instant_doubles` | `deck`, `path` | `{position}` | 复制曲目到另一盘同位置（E2.6 语义） |
+| M5 | `set_target` | `deck` | `{target}` | 目标盘切换（mix/prepare 的 now 盘） |
+
+**Jog / Pad（J1-J5，对照转盘与 Pad）**
+
+| # | cmd | args | result | 语义 |
+| --- | --- | --- | --- | --- |
+| J1 | `jog_touch` | `deck`, `on` | `{on}` | 转盘触摸态 |
+| J2 | `jog_scratch` | `deck`, `delta` | `{position}` | 搓碟位移（样本，块内平滑消费） |
+| J3 | `jog_bend` | `deck`, `rate` | `{rate}` | 弯音（钳 ±jog_bend_max；前端管累积与超时归零） |
+| J4 | `jog_search` | `deck`, `rate` | `{rate}` | SHIFT 高速搜索（钳 ±jog_search_max） |
+| J5 | `pad` | `deck`, `idx`, `mode`, `shift` | 按模式 | 五模式：Hot Cue（shift=清除/无=有则播放无则设）/ Beat Loop（拍梯 1-2-4-8-16-32；shift=关循环）/ Beat Jump（1/2/4/8 拍，前 4 后 4）/ Sampler（shift=卸载/有则播放）/ Key Shift（半音表 0,+1,+2,+3,-3,-2,-1,0；shift=累加/0 复位） |
+
+**Beat FX（F1-F5，对照 Beat FX 区）**
+
+| # | cmd | args | result | 语义 |
+| --- | --- | --- | --- | --- |
+| F1 | `set_fx` | `effect`, `depth`, `on` | `{fx}` | 效果/深度/开关全量应用（前端持完整状态）；通道外盘自动清除 |
+| F2 | `set_fx_channel` | `channel: 1/2/both` | `{fx}` | 通道切换（清旧+应用新防残留） |
+| F3 | `set_fx_beats` | `beats` | `{beats}` | 拍数（Echo/Delay 延迟 = beats/4 拍） |
+| F4 | `fx_auto` | — | `{beats}` | 以通道盘曲目 BPM 为时基；通道内有无 BPM 盘 → `bad_state` |
+| F5 | `fx_tap` | — | `{bpm}` | 通道第一盘点按测速；未成拍 → `bad_state` |
+
+**Phones 监听（H1-H2，对照耳机监听区）**
+
+| # | cmd | args | result | 语义 |
+| --- | --- | --- | --- | --- |
+| H1 | `phones_preview` | `deck` | `{active: deck/null}` | 独占切换（再点同盘停止；无设备 → `not_ready`） |
+| H2 | `set_phones_volume` | `volume` | `{volume}` | 监听音量 0..1 |
+
+**推荐 / Automix（A1-A3，对照推荐区；automix 注入前 → `not_ready`，曲库数据 PL005）**
+
+| # | cmd | args | result | 语义 |
+| --- | --- | --- | --- | --- |
+| A1 | `recommend` | — | `{name, explanation}` | 推荐下一曲（名称+中文理由）；无推荐 → `bad_state` |
+| A2 | `set_automix` | `on` | `{on}` | AUTO 自动接歌开关 |
+| A3 | `prepare_next` | — | `{entry: {path, name}}` | 以目标盘为 now 预备下一曲；失败 → `bad_state` |
+
+`deck` 取值 `"a"` | `"b"`，非法即 `bad_args`。`shift`（J5）为显式布尔参数（前端 Shift 键状态）。
 
 ## 4. 事件帧（服务端主动推送）
 
@@ -70,15 +140,26 @@
   "type": "tick",
   "t": 123456.789,
   "a": {"state": "playing", "paused": false, "position": 12.5, "duration": 210.0,
-         "bpm": 128.0, "cue": 3.2, "vu": 0.512},
-  "b": {"state": "idle", "paused": true, "position": 0.0, "duration": 0.0,
-         "bpm": 0.0, "cue": 0.0, "vu": 0.0}
+         "bpm": 128.0, "cue": 3.2, "vu": 0.512,
+         "tempo_rate": 1.06, "key_shift": 2, "keylock": true,
+         "loop": false, "slip": false,
+         "hot_cues": [true, false, false, false, false, false, false, false],
+         "sampler_loaded": [false, false, false, false, false, false, false, false]},
+  "b": {"…同构…"},
+  "target": "a",
+  "tempo_range": {"a": 6, "b": 6},
+  "sync": {"a": false, "b": false},
+  "fx": {"effect": "echo", "depth": 0.3, "on": true, "channel": "1", "beats": 4},
+  "cue_active": null
 }
 ```
 
-- `state`：`idle` / `playing` / `mixing`（引擎 State 枚举序列化值）
-- `position` / `duration` / `cue` 单位**秒**（float）；`vu` 0..1（峰值表）
-- `t`：服务端单调时钟（`time.monotonic()`），仅供客户端算抖动，不做墙钟对齐
+- 盘级（a/b）：`state`：`idle` / `playing` / `mixing`；`position`/`duration`/`cue` 单位**秒**；
+  `vu` 0..1；`tempo_rate` 乐速倍率；`key_shift` 半音；`keylock`/`loop`/`slip` 灯态 bool；
+  `hot_cues`/`sampler_loaded` 为 8 槽 bool 数组（`slot_count` 可配）
+- 顶级：`target` 目标盘；`tempo_range` 两盘量程（±6/±10/±16/100=WIDE）；`sync` 两盘 Sync 灯态；
+  `fx` Beat FX 组状态（网关持有）；`cue_active` 当前监听盘（null=未监听）
+- `t`：服务端单调时钟，仅供客户端算抖动
 - tick 帧可丢弃（见 §8 流控）；**绝不进音频回调**——纯事件循环读锁内状态
 
 ### 4.2 二进制峰值帧（预留，PL005 启用）
@@ -92,7 +173,8 @@
 | --- | --- | --- |
 | `unknown_cmd` | 未收录指令 | 指令拼写错误 / 前后端版本不匹配 |
 | `bad_args` | 参数缺失/非法 | `deck` 非 a/b、数值字段缺失 |
-| `not_ready` | 功能未接入 | `mix` 转场管理未注入（v1） |
+| `bad_state` | 引擎状态不满足指令 | Sync/Beatloop 无 BPM、无曲监听、FX 通道无 BPM 盘、无推荐 |
+| `not_ready` | 功能未接入 | `mix`（tm 未注入）、推荐/AUTO（automix 未注入）、监听无设备 |
 | `engine_error` | 引擎执行失败 | 解码失败、文件不存在（message 含中文原因） |
 | `bad_json` | 入站帧非合法 JSON | 客户端序列化错误 |
 

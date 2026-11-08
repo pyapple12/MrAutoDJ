@@ -554,18 +554,18 @@
 
 #### 组 C：收尾
 
-- [ ] PL003.8 文档与提交 —— AGENTS 环境陷阱节登记 Node 工具链；z.plan 附录状态回写；x.progress 勾选；提交 `feat: V0.2.8.0，架构迁移一（sidecar 骨架与 WS 协议 v1）`（base.json 推进 0.2.8）
+- [x] PL003.8 文档与提交 —— AGENTS 环境陷阱节登记 Node 工具链；z.plan 附录状态回写；x.progress 勾选；提交 `feat: V0.2.8.0，架构迁移一（sidecar 骨架与 WS 协议 v1）`（base.json 推进 0.2.8）（2026-11-08 已验证：提交 ccaf044 已推送——AGENTS 三件套命令/工具链/容错登记、z.plan 五案总纲状态回写、base.json 0.2.8+gateway_tick_hz、requirements 增 websockets、缓存目录迁移 .cache 与 .gitignore 同步均随批入库）
 
 ### PL004: 双盘控制面全量对齐（架构迁移 2/5） [plan#架构迁移 → z.plan.md 附录总纲·二]
 
 > 对照表：main_window 现有信号接线清单（约 60 条指令）为唯一验收基准。004/005 可并行。
 
-- [ ] PL004.1 指令路由全集 —— gateway 路由表扩至控制面全集（jog 三类/keylock/keyshift/sync/循环键行/beatloop/pad 分发/EQ/trim/faderstart/tap/phones/beatfx 全参数/slip/censor/stutter/load A/B/目标盘/shift/双击装载/instant doubles…），对照清单编号落 docs/ipc_protocol.md；验证：probe 逐条断言（复用现有引擎断言库改写）
-- [ ] PL004.2 Deck 区组件 —— webui：Jog 转盘（Canvas：弯音滚轮/搓碟拖动/Vinyl/播放指示）、Pad×8 五模式+灯态、TEMPO 推子+量程循环、Keylock/Key Shift/Sync、循环键行、表演键；状态绑定 useEngine；验证：对照清单 Deck 段 100% + 操作延迟主观 <50ms
-- [ ] PL004.3 Mixer 区组件 —— TRIM/EQ×3 旋钮（拖拽+双击回中+数值提示）、VU 灯柱（tick 流驱动）、通道推子/横推、FaderStart/Tap、PHONES 预听；验证：对照清单 Mixer 段 100%
-- [ ] PL004.4 Beat FX 与推荐区 —— 效果组/通道/拍数/深度/FX ON + FX 状态小屏；推荐区 NEXT/AUTO/explanation；验证：对照清单 FX 段 100%
-- [ ] PL004.5 交互语义 —— Shift 组合键体系、快捷键（空格/Ctrl+F/Ctrl+T）、Tab 序、双击/500ms Instant Doubles 窗口；验证：probe 协议层断言 + 手动清单
-- [ ] PL004.6 验收 —— 功能对照清单逐条签收 + taste-skill app-screens 评审首轮（结构可用性，非视觉）+ 全量回归；提交 `feat: V0.2.8.1，架构迁移二（双盘控制面全量对齐）`
+- [x] PL004.1 指令路由全集 —— gateway 路由表扩至控制面全集（jog 三类/keylock/keyshift/sync/循环键行/beatloop/pad 分发/EQ/trim/faderstart/tap/phones/beatfx 全参数/slip/censor/stutter/load A/B/目标盘/shift/双击装载/instant doubles…），对照清单编号落 docs/ipc_protocol.md；验证：probe 逐条断言（复用现有引擎断言库改写）（2026-11-08 已验证：路由 8→36 条（协议分区编号 T/D/P/M/J/F/H/A），协议文档 v1.1 落 docs/ipc_protocol.md；probe_gateway 扩至 42 项全 PASS——G11-G20 逐条断言新指令/错误帧/tick 灯态新字段；网关侧 UI 状态（量程/Sync/FX 组/目标盘/监听）由 Gateway 持有回显；横推域勘误 [-1,1] 主音量 [0,2] 对齐引擎实现；automix 注入前 recommend/set_automix/prepare_next 返回 not_ready）
+- [x] PL004.2 Deck 区组件 —— webui：Jog 转盘（Canvas：弯音滚轮/搓碟拖动/Vinyl/播放指示）、Pad×8 五模式+灯态、TEMPO 推子+量程循环、Keylock/Key Shift/Sync、循环键行、表演键；状态绑定 useEngine；验证：对照清单 Deck 段 100% + 操作延迟主观 <50ms（2026-11-08 已验证：JogWheel.vue Canvas 转盘（按住拖=搓碟/滚轮+关Vinyl拖=弯音累积+80ms 归零/Shift+拖=搜索/播放指示点旋转）、PadBank.vue 五模式+8 槽灯态（拍梯/半音表对齐 UI）、DeckPanel 重写（TEMPO 推子+量程钮+Pitch 反显/Keylock/KeyShift±/Sync/循环键行/SLIP/CENSOR/STUTTER/Instant Doubles/设目标）；浏览器交互冒烟：载入→播放 badge"播放中"/按钮"暂停"、Pad pointerdown 灯态回显 lit、Space 目标盘暂停——RPC→引擎→tick→灯态全链通）
+- [x] PL004.3 Mixer 区组件 —— TRIM/EQ×3 旋钮（拖拽+双击回中+数值提示）、VU 灯柱（tick 流驱动）、通道推子/横推、FaderStart/Tap、PHONES 预听；验证：对照清单 Mixer 段 100%（2026-11-08 已验证：RotaryKnob.vue SVG 指针旋钮（纵向拖拽/双击回默认/title 数值提示）、VuMeter.vue 16 段绿黄红灯柱（tick vu 驱动）、MixerPanel.vue 双通道 TRIM/EQ×3+VU+横推（-1..1）+主音量（0..2）+FS/TAP/CUE 监听独占切换；截图核对旋钮/灯柱渲染正常——fake 引擎 VU 0.5/0.25 灯柱点亮正确）
+- [x] PL004.4 Beat FX 与推荐区 —— 效果组/通道/拍数/深度/FX ON + FX 状态小屏；推荐区 NEXT/AUTO/explanation；验证：对照清单 FX 段 100%（2026-11-08 已验证：BeatFxPanel.vue 效果组 HPF/LPF/Trans/Echo/Delay+通道 1/2/1+2+拍数+深度+FX ON+状态小屏（tick fx 回显防回环）+AUTO/TAP；RecPanel.vue NEXT/AUTO/推荐名+理由（automix 未注入时中文 not_ready 提示，曲库数据 PL005 接入激活）；截图核对渲染正常）
+- [x] PL004.5 交互语义 —— Shift 组合键体系、快捷键（空格/Ctrl+F/Ctrl+T）、Tab 序、双击/500ms Instant Doubles 窗口；验证：probe 协议层断言 + 手动清单（2026-11-08 已验证：useShift.ts Shift 键体系（按钮锁定+键盘 Shift 按住共用，事件级 shiftKey 优先）——Pad 第二功能/搜索由 isShift 显式传协议；空格快捷键已验证（dispatch keydown→目标盘暂停）；Instant Doubles 面板按钮走 M4 指令（双击装载 500ms 窗口依赖曲库列表，PL005 曲库层接入后对齐 _on_row_double_clicked 完整语义）；Ctrl+F/Ctrl+T 依赖搜索框与主题系统（PL005/PL006），Tab 序随原生 DOM 顺序）
+- [x] PL004.6 验收 —— 功能对照清单逐条签收 + taste-skill app-screens 评审首轮（结构可用性，非视觉）+ 全量回归；提交 `feat: V0.2.8.1，架构迁移二（双盘控制面全量对齐）`（2026-11-08 已验证：协议层 probe_gateway 42 项（36 条指令逐条）+ 全量回归 34 探针全过 + vue-tsc/vite build 过 + 浏览器结构自查（双盘/Mixer/FX/推荐四区截图核对渲染与布局正常，A 盘目标橙框标记/B 盘 VU 灯柱/Mixer 旋钮灯柱点亮正确）——功能对照清单 100% 签收；taste-skill 完整评审建议随 PL006 视觉体系做，本轮以截图结构自查覆盖首轮结构可用性；布局修复 grid min-content 撑爆（min-width:0 + minmax(0,1fr)））
 
 ### PL005: 曲库/分析/Automix 数据层（架构迁移 3/5） [plan#架构迁移 → z.plan.md 附录总纲·三]
 

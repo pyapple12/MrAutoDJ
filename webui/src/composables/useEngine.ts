@@ -4,7 +4,7 @@
 import { listen } from '@tauri-apps/api/event'
 import { reactive, readonly } from 'vue'
 
-// 单盘状态快照（tick 帧内 a/b 字段，协议 §4.1）
+// 单盘状态快照（tick 帧内 a/b 字段，协议 §4.1 v1.1）
 export interface DeckState {
   state: string
   paused: boolean
@@ -13,6 +13,22 @@ export interface DeckState {
   bpm: number
   cue: number
   vu: number
+  tempo_rate: number
+  key_shift: number
+  keylock: boolean
+  loop: boolean
+  slip: boolean
+  hot_cues: readonly boolean[]
+  sampler_loaded: readonly boolean[]
+}
+
+// Beat FX 组状态（网关持有，协议 F1-F2）
+export interface FxState {
+  effect: string
+  depth: number
+  on: boolean
+  channel: '1' | '2' | 'both' | string
+  beats: number
 }
 
 // hello 握手帧（协议 §2）
@@ -55,6 +71,13 @@ const emptyDeck = (): DeckState => ({
   bpm: 0,
   cue: 0,
   vu: 0,
+  tempo_rate: 1,
+  key_shift: 0,
+  keylock: false,
+  loop: false,
+  slip: false,
+  hot_cues: Array.from({ length: 8 }, () => false),
+  sampler_loaded: Array.from({ length: 8 }, () => false),
 })
 
 // Tauri 环境判定（@tauri-apps/api 注入 __TAURI_INTERNALS__）
@@ -76,6 +99,11 @@ export function useEngine() {
     tickHz: 0,
     a: emptyDeck(),
     b: emptyDeck(),
+    target: 'a',
+    tempo_range: { a: 6, b: 6 } as Record<string, number>,
+    sync: { a: false, b: false } as Record<string, boolean>,
+    fx: { effect: '', depth: 0, on: false, channel: '1', beats: 4 } as FxState,
+    cue_active: null as string | null,
   })
 
   let ws: WebSocket | null = null

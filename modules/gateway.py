@@ -25,6 +25,7 @@ PROTOCOL_VERSION = 1
 E_UNKNOWN_CMD = "unknown_cmd"
 E_BAD_ARGS = "bad_args"
 E_NOT_READY = "not_ready"
+E_BAD_STATE = "bad_state"
 E_ENGINE = "engine_error"
 E_BAD_JSON = "bad_json"
 
@@ -44,8 +45,27 @@ class GatewayError(Exception):
 # ---------------------------------------------------------------------------
 
 
+class FakeDeckEQ:
+    # 假三频 EQ：仅记录（接口对齐 engine.DeckEQ 的 setter 面）
+    def __init__(self):
+        self.low = self.mid = self.high = 0.0
+
+    def set_low(self, amt: float) -> None:
+        self.low = float(amt)
+
+    def set_mid(self, amt: float) -> None:
+        self.mid = float(amt)
+
+    def set_high(self, amt: float) -> None:
+        self.high = float(amt)
+
+    def reset(self) -> None:
+        self.low = self.mid = self.high = 0.0
+
+
 class FakeDeck:
     # 假打碟机：wall-clock 位置推进 + 状态翻转，接口对齐 engine.Deck 公开面
+    # （PL004 控制面全集——tempo/表演键/循环/eq/fx/hotcue/sampler/jog 全鸭子对齐）
     def __init__(self, lock):
         self._lock = lock
         self._n = 0
@@ -54,6 +74,20 @@ class FakeDeck:
         self._is_paused = True
         self._cue = 0.0
         self.bpm = 0.0
+        self._rate = 1.0
+        self._keylock_on = False
+        self._key_shift_val = 0
+        self._slip_on = False
+        self._loop_on = False
+        self._censor_on = False
+        self.eq = FakeDeckEQ()
+        self._fx = ""
+        self._fx_beats = 4
+        self._hot_cues = [False] * 8
+        self._samples = [False] * 8
+        self._jog_touched = False
+        self._bend = 0.0
+        self._search = 0.0
 
     def play(self, audio: np.ndarray) -> None:
         # 假播放：记录时长并从当前起点推进（等价真 Deck 的 play 语义）
@@ -93,6 +127,18 @@ class FakeDeck:
         pos = self._pos0 + int((time.monotonic() - self._t0) * SAMPLE_RATE)
         return min(pos, self._n)
 
+    @property
+    def tempo_rate(self) -> float:
+        return self._rate
+
+    @property
+    def effective_bpm(self) -> float:
+        return self.bpm * self._rate
+
+    @property
+    def key_shift(self) -> int:
+        return self._key_shift_val
+
     def set_position_samples(self, samples: int) -> None:
         # seek：重定位（播放中重置推进起点）
         self._pos0 = max(0, int(samples))
@@ -101,15 +147,138 @@ class FakeDeck:
     def set_tempo(self, bpm: float) -> None:
         self.bpm = float(bpm or 0.0)
 
+    def set_tempo_rate(self, rate: float) -> None:
+        self._rate = float(rate)
+
+    def set_keylock(self, on: bool) -> None:
+        self._keylock_on = bool(on)
+
+    def set_key_shift(self, semitones: int) -> None:
+        self._key_shift_val = int(semitones)
+
+    def slip_toggle(self, active: bool) -> None:
+        self._slip_on = bool(active)
+
+    def slip_active(self) -> bool:
+        return self._slip_on
+
+    def censor(self, active: bool) -> None:
+        self._censor_on = bool(active)
+
+    def stutter(self) -> None:
+        pass
+
+    def set_loop(self, active: bool) -> None:
+        self._loop_on = bool(active)
+
+    def loop_active(self) -> bool:
+        return self._loop_on
+
+    def set_beatloop(self, beats: int, bpm: float) -> None:
+        self._loop_on = True
+
+    def loop_in(self) -> None:
+        pass
+
+    def loop_out(self) -> None:
+        pass
+
+    def loop_halve(self) -> None:
+        pass
+
+    def loop_double(self) -> None:
+        pass
+
+    def beat_jump(self, beats: int, align: bool = False) -> None:
+        pass
+
+    def set_pregain(self, gain: float) -> None:
+        self._pregain = float(gain)
+
+    def set_fx(self, effect: str, depth: float) -> None:
+        self._fx = str(effect)
+
+    def set_fx_beats(self, beats: int) -> None:
+        self._fx_beats = int(beats)
+
+    def tap(self) -> float:
+        # 假 tap：固定返回 120（探针断言 bpm>0 用）
+        return 120.0
+
+    def hot_cue_set(self, slot: int) -> None:
+        self._hot_cues[slot] = True
+
+    def hot_cue_play(self, slot: int) -> None:
+        pass
+
+    def hot_cue_clear(self, slot: int) -> None:
+        self._hot_cues[slot] = False
+
+    def hot_cue_state(self, slot: int) -> dict:
+        return {"has": self._hot_cues[slot]}
+
+    def sample_load(self, slot: int, audio: np.ndarray) -> None:
+        self._samples[slot] = True
+
+    def sample_play(self, slot: int) -> None:
+        pass
+
+    def sample_stop(self, slot: int) -> None:
+        pass
+
+    def sample_unload(self, slot: int) -> None:
+        self._samples[slot] = False
+
+    def sample_state(self, slot: int) -> dict:
+        return {"loaded": self._samples[slot]}
+
+    def jog_touch(self, on: bool) -> None:
+        self._jog_touched = bool(on)
+
+    def jog_scratch(self, delta_samples: int) -> None:
+        self._pos0 = max(0, self.position + int(delta_samples))
+        self._t0 = time.monotonic()
+
+    def jog_bend(self, rate: float) -> None:
+        self._bend = float(rate)
+
+    def jog_search(self, rate: float) -> None:
+        self._search = float(rate)
+
     def cue_set(self) -> None:
         self._cue = self.position / SAMPLE_RATE
 
     def cue_play(self) -> None:
         self.set_position_samples(int(self._cue * SAMPLE_RATE))
 
+    def cue_buffer(self) -> np.ndarray | None:
+        # 监听预听缓冲：CUE 点到曲尾（假件从 CUE 起合成短段；无曲返回 None）
+        if self._n == 0:
+            return None
+        n = max(1, self._n - int(self._cue * SAMPLE_RATE))
+        t = np.arange(n) / SAMPLE_RATE
+        mono = (0.3 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+        return np.stack([mono, mono], axis=1)
+
     @property
     def cue_seconds(self) -> float:
         return self._cue
+
+
+class FakeCuePlayer:
+    # 假监听播放器：记录播放态（接口对齐 engine CuePlayer 公开面）
+    def __init__(self):
+        self.is_dead = False
+        self.playing = False
+
+    def play(self, buf) -> None:
+        self.playing = True
+
+    def stop(self) -> None:
+        self.playing = False
+
+    def set_volume(self, v: float) -> None:
+        pass
 
 
 class FakeCrossfader:
@@ -128,6 +297,7 @@ class FakeEngine:
         self.deck_a = FakeDeck(self._lock)
         self.deck_b = FakeDeck(self._lock)
         self.crossfader = FakeCrossfader()
+        self.cue_player = FakeCuePlayer()
 
     def load_audio(self, path: str) -> np.ndarray:
         # 合成 30 秒 440Hz 正弦（假件不触盘、不解码）
@@ -145,8 +315,8 @@ class FakeEngine:
     def set_fader_start(self, enabled: bool) -> None:
         pass
 
-    def ensure_cue_player(self) -> None:
-        pass
+    def ensure_cue_player(self):
+        return self.cue_player
 
     def close(self) -> None:
         pass
@@ -166,20 +336,30 @@ class _ClientConn:
 
 
 class Gateway:
-    # WS 网关：RPC 路由 + 30Hz 状态推流（引擎注入，tm 可选）
-    def __init__(self, engine, tick_hz: int = DEFAULT_TICK_HZ, tm=None, use_fake: bool = False):
+    # WS 网关：RPC 路由 + 30Hz 状态推流（引擎注入，tm/automix 可选）
+    def __init__(self, engine, tick_hz: int = DEFAULT_TICK_HZ, tm=None, automix=None, use_fake: bool = False):
         # 引擎注入：use_fake 或 engine 为 None 时用假引擎（CLI --fake / 探针）
         if use_fake or engine is None:
             engine = FakeEngine()
             _logger.info("gateway 使用假引擎（--fake 模式）")
         self.engine = engine
         self.tm = tm
+        self.automix = automix
         self.tick_hz = max(1, int(tick_hz))
+        self.slot_count = int(_BASE.get("slot_count", 8))
+        # 网关侧 UI 状态（对齐 main_window 拥有的非引擎状态；引擎零改动）
+        self._tempo_ranges = [int(r) for r in _BASE.get("tempo_ranges", [6, 10, 16, 100])]
+        self._tempo_range = {"a": self._tempo_ranges[0], "b": self._tempo_ranges[0]}
+        self._sync_on = {"a": False, "b": False}
+        self._fx = {"effect": "", "depth": 0.0, "on": False, "channel": "1", "beats": 4}
+        self._target = "a"
+        self._cue_active: str | None = None
         self._clients: set[_ClientConn] = set()
         self._server = None
         self._tick_task: asyncio.Task | None = None
-        # 指令路由表 v1（PL003.2：8 条，逐条映射引擎方法；锁语义沿用引擎内部锁）
+        # 指令路由表（PL003 v1 8 条 + PL004 控制面全集；锁语义沿用引擎内部锁）
         self._routes = {
+            # 传输（PL003）
             "load": self._cmd_load,
             "play": self._cmd_play,
             "pause": self._cmd_pause,
@@ -188,6 +368,46 @@ class Gateway:
             "set_volume": self._cmd_set_volume,
             "set_xfader": self._cmd_set_xfader,
             "mix": self._cmd_mix,
+            # TEMPO / Sync / 循环
+            "set_tempo_rate": self._cmd_set_tempo_rate,
+            "cycle_tempo_range": self._cmd_cycle_tempo_range,
+            "set_sync": self._cmd_set_sync,
+            "set_loop": self._cmd_set_loop,
+            "loop": self._cmd_loop,
+            "beatloop": self._cmd_beatloop,
+            # 表演键
+            "set_keylock": self._cmd_set_keylock,
+            "set_key_shift": self._cmd_set_key_shift,
+            "slip": self._cmd_slip,
+            "censor": self._cmd_censor,
+            "stutter": self._cmd_stutter,
+            "tap": self._cmd_tap,
+            # Mixer
+            "set_pregain": self._cmd_set_pregain,
+            "set_eq": self._cmd_set_eq,
+            "fader_start": self._cmd_fader_start,
+            "instant_doubles": self._cmd_instant_doubles,
+            "set_target": self._cmd_set_target,
+            # Jog
+            "jog_touch": self._cmd_jog_touch,
+            "jog_scratch": self._cmd_jog_scratch,
+            "jog_bend": self._cmd_jog_bend,
+            "jog_search": self._cmd_jog_search,
+            # Pad
+            "pad": self._cmd_pad,
+            # Beat FX
+            "set_fx": self._cmd_set_fx,
+            "set_fx_channel": self._cmd_set_fx_channel,
+            "set_fx_beats": self._cmd_set_fx_beats,
+            "fx_auto": self._cmd_fx_auto,
+            "fx_tap": self._cmd_fx_tap,
+            # Phones 监听
+            "phones_preview": self._cmd_phones_preview,
+            "set_phones_volume": self._cmd_set_phones_volume,
+            # 推荐 / Automix
+            "recommend": self._cmd_recommend,
+            "set_automix": self._cmd_set_automix,
+            "prepare_next": self._cmd_prepare_next,
         }
 
     async def serve(self, host: str = "127.0.0.1", port: int = 0) -> int:
@@ -319,20 +539,26 @@ class Gateway:
             await asyncio.sleep(max(0.0, delay))
 
     def _tick_frame(self) -> dict:
-        # 组装状态帧：两盘位置/状态/BPM/CUE/VU（vu_levels 引擎锁内读，短）
+        # 组装状态帧：两盘状态 + 顶级 UI 状态回显（target/量程/sync/fx/监听）
         vu = self.engine.vu_levels() or []
         return {
             "type": "tick",
             "t": time.monotonic(),
             "a": self._deck_state(self.engine.deck_a, vu[0] if len(vu) > 0 else 0.0),
             "b": self._deck_state(self.engine.deck_b, vu[1] if len(vu) > 1 else 0.0),
+            "target": self._target,
+            "tempo_range": dict(self._tempo_range),
+            "sync": dict(self._sync_on),
+            "fx": dict(self._fx),
+            "cue_active": self._cue_active,
         }
 
     def _deck_state(self, deck, vu: float) -> dict:
-        # 单盘状态快照：position/duration 样本转秒（前端友好）
+        # 单盘状态快照：position/duration 样本转秒（前端友好）+ 灯态数组
         state = getattr(deck, "state", "idle")
         if hasattr(state, "value"):
             state = state.value
+        slots = self.slot_count
         return {
             "state": str(state),
             "paused": bool(getattr(deck, "paused", True)),
@@ -341,6 +567,17 @@ class Gateway:
             "bpm": float(getattr(deck, "bpm", 0.0) or 0.0),
             "cue": float(getattr(deck, "cue_seconds", 0.0) or 0.0),
             "vu": round(float(vu), 3),
+            "tempo_rate": float(getattr(deck, "tempo_rate", 1.0)),
+            "key_shift": int(getattr(deck, "key_shift", 0)),
+            "keylock": bool(getattr(deck, "_keylock_on", False)),
+            "loop": bool(deck.loop_active()) if hasattr(deck, "loop_active") else False,
+            "slip": bool(deck.slip_active()) if hasattr(deck, "slip_active") else False,
+            "hot_cues": [
+                bool(deck.hot_cue_state(i)["has"]) for i in range(slots)
+            ],
+            "sampler_loaded": [
+                bool(deck.sample_state(i)["loaded"]) for i in range(slots)
+            ],
         }
 
     # --- 指令实现（v1 路由 8 条） ---
@@ -415,35 +652,416 @@ class Gateway:
         return {"position": float(deck.position) / SAMPLE_RATE}
 
     def _cmd_set_volume(self, args: dict) -> dict:
-        # set_volume {volume}：主音量 0..1
-        v = self._clamp01(self._req_float(args, "volume"))
+        # set_volume {volume}：主音量 0..2（>1 boost；对齐 UI RotaryKnob(0,2) 域）
+        v = self._req_float(args, "volume")
+        v = max(0.0, min(2.0, v))
         self.engine.set_volume(v)
         return {"volume": v}
 
     def _cmd_set_xfader(self, args: dict) -> dict:
-        # set_xfader {position}：横推 0..1（0=A 全出，1=B 全出）
-        v = self._clamp01(self._req_float(args, "position"))
+        # set_xfader {position}：横推 -1..1（-1=A 全出，0=居中，1=B 全出；
+        # 对齐 Crossfader.set_position 的 [-1,1] 钳制）
+        v = self._req_float(args, "position")
+        v = max(-1.0, min(1.0, v))
         self.engine.crossfader.set_position(v)
         return {"position": v}
 
     def _cmd_mix(self, args: dict) -> dict:
-        # mix {deck}：v1 协议占位——tm 未接入报 not_ready；接入后调 tm.mix_now(deck)
+        # mix {deck}：tm 未接入报 not_ready；接入后调 tm.mix_now(deck)
         deck = self._req_deck(args)
         if self.tm is None:
-            raise GatewayError(E_NOT_READY, "转场管理未接入（PL003 v1 仅协议占位）")
+            raise GatewayError(E_NOT_READY, "转场管理未接入（PL005 曲库层接入时注入）")
         triggered = bool(self.tm.mix_now(deck))
         return {"triggered": triggered}
+
+    # --- TEMPO / Sync / 循环（PL004 对照 main_window _on_tempo/_on_sync/_loop_action） ---
+
+    def _cmd_set_tempo_rate(self, args: dict) -> dict:
+        # set_tempo_rate {deck, rate}：乐速倍率（前端 TEMPO 推子按量程换算）；
+        # 手动变速解除该盘 Beat Sync（UI 同款语义）
+        deck = self._req_deck(args)
+        rate = self._req_float(args, "rate")
+        deck.set_tempo_rate(rate)
+        letter = str(args.get("deck") or "").lower()
+        if self._sync_on.get(letter):
+            self._sync_on[letter] = False
+        return {"rate": float(getattr(deck, "tempo_rate", rate))}
+
+    def _cmd_cycle_tempo_range(self, args: dict) -> dict:
+        # cycle_tempo_range {deck}：量程循环 ±6/±10/±16/WIDE（网关侧状态）
+        letter = str(args.get("deck") or "").lower()
+        if letter not in ("a", "b"):
+            raise GatewayError(E_BAD_ARGS, "deck 必须是 'a' 或 'b'")
+        ranges = self._tempo_ranges
+        cur = self._tempo_range[letter]
+        idx = ranges.index(cur) if cur in ranges else 0
+        nxt = ranges[(idx + 1) % len(ranges)]
+        self._tempo_range[letter] = nxt
+        return {"range": nxt, "wide": nxt >= 100, "label": "WIDE" if nxt >= 100 else f"±{nxt}%"}
+
+    def _cmd_set_sync(self, args: dict) -> dict:
+        # set_sync {deck, on}：对齐另一盘有效 BPM（钳当前量程；BPM 未知报 bad_state）
+        letter = str(args.get("deck") or "").lower()
+        deck = self._req_deck(args)
+        on = bool(args.get("on"))
+        if not on:
+            self._sync_on[letter] = False
+            return {"synced": False}
+        other_letter = "b" if letter == "a" else "a"
+        other_deck = getattr(self.engine, f"deck_{other_letter}")
+        target = float(getattr(other_deck, "effective_bpm", 0.0) or 0.0)
+        my_bpm = float(getattr(deck, "bpm", 0.0) or 0.0)
+        if my_bpm <= 0 or target <= 0:
+            self._sync_on[letter] = False
+            raise GatewayError(E_BAD_STATE, "Beat Sync 失败：双方需已知 BPM")
+        pct = self._tempo_range[letter] / 100.0
+        rate = max(1.0 - pct, min(1.0 + pct, target / my_bpm))
+        deck.set_tempo_rate(rate)
+        self._sync_on[letter] = True
+        return {"synced": True, "rate": rate, "target": target}
+
+    def _cmd_set_loop(self, args: dict) -> dict:
+        # set_loop {deck, on}：循环开关
+        self._req_deck(args).set_loop(bool(args.get("on")))
+        return {"on": bool(args.get("on"))}
+
+    def _cmd_loop(self, args: dict) -> dict:
+        # loop {deck, action}：in/out/halve/double 四动作分发
+        deck = self._req_deck(args)
+        action = str(args.get("action") or "")
+        actions = {
+            "in": deck.loop_in,
+            "out": deck.loop_out,
+            "halve": deck.loop_halve,
+            "double": deck.loop_double,
+        }
+        if action not in actions:
+            raise GatewayError(E_BAD_ARGS, "action 必须是 in/out/halve/double")
+        actions[action]()
+        return {"action": action, "loop_active": bool(deck.loop_active())}
+
+    def _cmd_beatloop(self, args: dict) -> dict:
+        # beatloop {deck, beats}：按当前盘 BPM 设拍循环（BPM 未知报 bad_state）
+        deck = self._req_deck(args)
+        beats = int(args.get("beats") or 0)
+        if beats <= 0:
+            raise GatewayError(E_BAD_ARGS, "beats 必须为正整数")
+        bpm = float(getattr(deck, "bpm", 0.0) or 0.0)
+        if bpm <= 0:
+            raise GatewayError(E_BAD_STATE, "当前盘 BPM 未知，无法 Beatloop")
+        deck.set_beatloop(beats, bpm)
+        return {"beats": beats, "bpm": bpm}
+
+    # --- 表演键（PL004 对照 main_window 表演键区 + tap） ---
+
+    def _cmd_set_keylock(self, args: dict) -> dict:
+        # set_keylock {deck, on}：变速不变调开关（rubberband 后台重渲染）
+        self._req_deck(args).set_keylock(bool(args.get("on")))
+        return {"on": bool(args.get("on"))}
+
+    def _cmd_set_key_shift(self, args: dict) -> dict:
+        # set_key_shift {deck, semitones}：移调（钳 ±key_shift_max）
+        deck = self._req_deck(args)
+        semi = int(args.get("semitones") or 0)
+        semi = max(-int(_BASE.get("key_shift_max", 12)), min(int(_BASE.get("key_shift_max", 12)), semi))
+        deck.set_key_shift(semi)
+        return {"semitones": int(getattr(deck, "key_shift", semi))}
+
+    def _cmd_slip(self, args: dict) -> dict:
+        # slip {deck, on}：滑行模式
+        self._req_deck(args).slip_toggle(bool(args.get("on")))
+        return {"on": bool(args.get("on"))}
+
+    def _cmd_censor(self, args: dict) -> dict:
+        # censor {deck, on}：消音
+        self._req_deck(args).censor(bool(args.get("on")))
+        return {"on": bool(args.get("on"))}
+
+    def _cmd_stutter(self, args: dict) -> dict:
+        # stutter {deck}：结巴重复（按下触发）
+        self._req_deck(args).stutter()
+        return {"ok_pressed": True}
+
+    def _cmd_tap(self, args: dict) -> dict:
+        # tap {deck}：点按测速（返回当前测得 BPM，0=未成拍）
+        bpm = float(self._req_deck(args).tap() or 0.0)
+        return {"bpm": bpm}
+
+    # --- Mixer（PL004 对照 trim/EQ/fader start/instant doubles/目标盘） ---
+
+    def _cmd_set_pregain(self, args: dict) -> dict:
+        # set_pregain {deck, gain}：TRIM 前级增益
+        deck = self._req_deck(args)
+        gain = self._req_float(args, "gain")
+        deck.set_pregain(gain)
+        return {"gain": gain}
+
+    def _cmd_set_eq(self, args: dict) -> dict:
+        # set_eq {deck, band, gain}：三频 EQ（band = low/mid/high）
+        deck = self._req_deck(args)
+        band = str(args.get("band") or "")
+        gain = self._req_float(args, "gain")
+        setters = {"low": deck.eq.set_low, "mid": deck.eq.set_mid, "high": deck.eq.set_high}
+        if band not in setters:
+            raise GatewayError(E_BAD_ARGS, "band 必须是 low/mid/high")
+        setters[band](gain)
+        return {"band": band, "gain": gain}
+
+    def _cmd_fader_start(self, args: dict) -> dict:
+        # fader_start {on}：推子启动开关（全局）
+        self.engine.set_fader_start(bool(args.get("on")))
+        return {"on": bool(args.get("on"))}
+
+    async def _cmd_instant_doubles(self, args: dict) -> dict:
+        # instant_doubles {deck, path}：复制曲目到另一盘同位置（UI E2.6 语义）
+        deck = self._req_deck(args)
+        path = str(args.get("path") or "").strip()
+        if not path:
+            raise GatewayError(E_BAD_ARGS, "path 不能为空")
+        letter = str(args.get("deck") or "").lower()
+        other = getattr(self.engine, f"deck_{'b' if letter == 'a' else 'a'}")
+        try:
+            audio = await asyncio.to_thread(self.engine.load_audio, path)
+        except Exception as exc:
+            raise GatewayError(E_ENGINE, f"加载失败: {exc}") from exc
+        other.play(audio)
+        other.set_position_samples(int(getattr(deck, "position", 0)))
+        return {"position": float(other.position) / SAMPLE_RATE}
+
+    def _cmd_set_target(self, args: dict) -> dict:
+        # set_target {deck}：目标盘切换（mix/prepare 的 now 盘语义）
+        letter = str(args.get("deck") or "").lower()
+        if letter not in ("a", "b"):
+            raise GatewayError(E_BAD_ARGS, "deck 必须是 'a' 或 'b'")
+        self._target = letter
+        return {"target": self._target}
+
+    # --- Jog（PL004 对照 jog 三类 + 弯音） ---
+
+    def _cmd_jog_touch(self, args: dict) -> dict:
+        # jog_touch {deck, on}：转盘触摸态（按下重置搓碟基准，松手 slip 落回）
+        self._req_deck(args).jog_touch(bool(args.get("on")))
+        return {"on": bool(args.get("on"))}
+
+    def _cmd_jog_scratch(self, args: dict) -> dict:
+        # jog_scratch {deck, delta}：搓碟位移（样本，块内平滑消费）
+        self._req_deck(args).jog_scratch(int(args.get("delta") or 0))
+        return {"position": float(self._req_deck(args).position) / SAMPLE_RATE}
+
+    def _cmd_jog_bend(self, args: dict) -> dict:
+        # jog_bend {deck, rate}：弯音速率（钳 ±jog_bend_max；前端管累积与超时归零）
+        deck = self._req_deck(args)
+        rate = self._req_float(args, "rate")
+        bend_max = float(_BASE.get("jog_bend_max", 0.5))
+        deck.jog_bend(max(-bend_max, min(bend_max, rate)))
+        return {"rate": rate}
+
+    def _cmd_jog_search(self, args: dict) -> dict:
+        # jog_search {deck, rate}：SHIFT 高速搜索（钳 ±jog_search_max）
+        deck = self._req_deck(args)
+        rate = self._req_float(args, "rate")
+        search_max = float(_BASE.get("jog_search_max", 16.0))
+        deck.jog_search(max(-search_max, min(search_max, rate)))
+        return {"rate": rate}
+
+    # --- Pad（PL004 对照 _on_pad 五模式直译；shift 为显式参数） ---
+
+    def _cmd_pad(self, args: dict) -> dict:
+        # pad {deck, idx, mode, shift}：五模式分发（Hot Cue/Beat Loop/Beat Jump/
+        # Sampler/Key Shift；语义逐条对齐 main_window._on_pad）
+        deck = self._req_deck(args)
+        letter = str(args.get("deck") or "").lower()
+        idx = int(args.get("idx") or 0)
+        mode = str(args.get("mode") or "")
+        shift = bool(args.get("shift"))
+        slots = self.slot_count
+        if idx < 0 or idx >= slots:
+            raise GatewayError(E_BAD_ARGS, f"idx 超出 0..{slots - 1}")
+        if mode == "Hot Cue":
+            if shift:
+                deck.hot_cue_clear(idx)
+            elif deck.hot_cue_state(idx)["has"]:
+                deck.hot_cue_play(idx)
+            else:
+                deck.hot_cue_set(idx)
+            return {"mode": mode, "idx": idx, "has": bool(deck.hot_cue_state(idx)["has"])}
+        if mode == "Beat Loop":
+            if shift:
+                deck.set_loop(False)
+                return {"mode": mode, "loop_off": True}
+            # 拍梯（对齐 beat_fx_widget BEAT_LADDER [1,2,4,8,16,32]——UI 层常量，
+            # 网关不可 import ui/，此处同值对齐并在协议文档注明）
+            beat_ladder = [1, 2, 4, 8, 16, 32]
+            bpm = float(getattr(deck, "bpm", 0.0) or 0.0)
+            if bpm <= 0:
+                raise GatewayError(E_BAD_STATE, "当前盘 BPM 未知，无法 Beatloop")
+            deck.set_beatloop(beat_ladder[idx % len(beat_ladder)], bpm)
+            return {"mode": mode, "idx": idx, "beats": beat_ladder[idx % len(beat_ladder)]}
+        if mode == "Beat Jump":
+            step = [1, 2, 4, 8][idx % 4]
+            direction = -1 if idx < 4 else 1
+            deck.beat_jump(direction * step, align=True)
+            return {"mode": mode, "idx": idx, "jump": direction * step}
+        if mode == "Sampler":
+            if shift:
+                deck.sample_unload(idx)
+            elif deck.sample_state(idx)["loaded"]:
+                deck.sample_play(idx)
+            # 未装填且无 shift：仅返回 loaded=false 提示（UI 同款：无装填入口提示）
+            return {"mode": mode, "idx": idx, "loaded": bool(deck.sample_state(idx)["loaded"])}
+        if mode == "Key Shift":
+            # FLX4 语义半音表（对齐 main_window：slot1-8 → 0/+1/+2/+3/-3/-2/-1/0）
+            semitone_table = [0, 1, 2, 3, -3, -2, -1, 0]
+            if idx >= len(semitone_table):
+                return {"mode": mode, "idx": idx, "ignored": True}
+            semitones = semitone_table[idx]
+            if shift:
+                deck.set_key_shift(int(getattr(deck, "key_shift", 0)) + semitones if semitones else 0)
+            else:
+                deck.set_key_shift(semitones)
+            return {"mode": mode, "idx": idx, "key_shift": int(getattr(deck, "key_shift", 0))}
+        raise GatewayError(E_BAD_ARGS, f"未知 Pad 模式: {mode}")
+
+    # --- Beat FX（PL004 对照 beat fx 组状态 + 通道应用） ---
+
+    def _fx_channel_decks(self) -> list:
+        # FX 通道 → 目标盘列表（1/2/both，对齐 main_window._fx_channel_decks）
+        return {
+            "1": [self.engine.deck_a],
+            "2": [self.engine.deck_b],
+            "both": [self.engine.deck_a, self.engine.deck_b],
+        }.get(self._fx["channel"], [self.engine.deck_a])
+
+    def _apply_fx(self) -> None:
+        # 按网关 fx 状态应用到通道盘（清非通道盘防残留——UI 同款）
+        for d in (self.engine.deck_a, self.engine.deck_b):
+            if d not in self._fx_channel_decks():
+                d.set_fx("", 0.0)
+        for d in self._fx_channel_decks():
+            if self._fx["on"] and self._fx["effect"]:
+                d.set_fx(self._fx["effect"], self._fx["depth"])
+            else:
+                d.set_fx("", 0.0)
+
+    def _cmd_set_fx(self, args: dict) -> dict:
+        # set_fx {effect, depth, on}：效果/深度/开关三参全量应用（前端持完整状态）
+        if "effect" in args:
+            self._fx["effect"] = str(args.get("effect") or "")
+        if "depth" in args:
+            self._fx["depth"] = max(0.0, min(1.0, float(args.get("depth") or 0.0)))
+        if "on" in args:
+            self._fx["on"] = bool(args.get("on"))
+        self._apply_fx()
+        return {"fx": dict(self._fx)}
+
+    def _cmd_set_fx_channel(self, args: dict) -> dict:
+        # set_fx_channel {channel}：通道切换（1/2/both；切后清旧+应用新）
+        ch = str(args.get("channel") or "")
+        if ch not in ("1", "2", "both"):
+            raise GatewayError(E_BAD_ARGS, "channel 必须是 1/2/both")
+        self._fx["channel"] = ch
+        self._apply_fx()
+        return {"fx": dict(self._fx)}
+
+    def _cmd_set_fx_beats(self, args: dict) -> dict:
+        # set_fx_beats {beats}：拍数（Echo/Delay 延迟 = beats/4 拍）
+        beats = int(args.get("beats") or 0)
+        if beats <= 0:
+            raise GatewayError(E_BAD_ARGS, "beats 必须为正整数")
+        self._fx["beats"] = beats
+        for d in (self.engine.deck_a, self.engine.deck_b):
+            d.set_fx_beats(beats)
+        return {"beats": beats}
+
+    def _cmd_fx_auto(self, args: dict) -> dict:
+        # fx_auto：以通道盘曲目 BPM 为 FX 时基（通道内存在无 BPM 盘报 bad_state）
+        decks = self._fx_channel_decks()
+        if any(float(getattr(d, "bpm", 0.0) or 0.0) <= 0 for d in decks):
+            raise GatewayError(E_BAD_STATE, "FX AUTO：通道内存在无 BPM 的盘（先加载曲目或 Tap）")
+        for d in decks:
+            d.set_fx_beats(self._fx["beats"])
+        return {"beats": self._fx["beats"]}
+
+    def _cmd_fx_tap(self, args: dict) -> dict:
+        # fx_tap：通道第一盘点按测速作为 FX 时基
+        bpm = float(self._fx_channel_decks()[0].tap() or 0.0)
+        if bpm <= 0:
+            raise GatewayError(E_BAD_STATE, "FX TAP：连续点按至少 2 次")
+        return {"bpm": bpm}
+
+    # --- Phones 监听（PL004 对照独占切换 + 音量） ---
+
+    def _cmd_phones_preview(self, args: dict) -> dict:
+        # phones_preview {deck}：独占切换（再点同盘停止；切盘换源）
+        letter = str(args.get("deck") or "").lower()
+        if letter not in ("a", "b"):
+            raise GatewayError(E_BAD_ARGS, "deck 必须是 'a' 或 'b'")
+        player = self.engine.ensure_cue_player()
+        if player is None or getattr(player, "is_dead", False):
+            raise GatewayError(E_NOT_READY, "耳机监听不可用（无可用输出设备）")
+        if self._cue_active == letter:
+            player.stop()
+            self._cue_active = None
+            return {"active": None}
+        deck = getattr(self.engine, f"deck_{letter}")
+        buf = deck.cue_buffer()
+        if buf is None or len(buf) == 0:
+            raise GatewayError(E_BAD_STATE, f"DECK {letter.upper()} 无音频可监听")
+        player.play(buf)
+        self._cue_active = letter
+        return {"active": self._cue_active}
+
+    def _cmd_set_phones_volume(self, args: dict) -> dict:
+        # set_phones_volume {volume}：监听音量 0..1
+        v = self._clamp01(self._req_float(args, "volume"))
+        player = self.engine.ensure_cue_player()
+        if player is not None:
+            player.set_volume(v)
+        return {"volume": v}
+
+    # --- 推荐 / Automix（PL004 协议占位；automix 注入后激活——曲库数据 PL005） ---
+
+    def _req_automix(self):
+        # automix 控制器校验（未注入报 not_ready——推荐区依赖曲库数据层）
+        if self.automix is None:
+            raise GatewayError(E_NOT_READY, "自动编排未接入（曲库数据层接入时注入）")
+        return self.automix
+
+    def _cmd_recommend(self, args: dict) -> dict:
+        # recommend：推荐下一曲（名称 + 中文理由）
+        rec = self._req_automix().recommend()
+        if rec is None:
+            raise GatewayError(E_BAD_STATE, "无可用推荐（当前盘需已知 BPM 且曲库有其他曲目）")
+        return {"name": rec["entry"]["name"], "explanation": rec["explanation"]}
+
+    def _cmd_set_automix(self, args: dict) -> dict:
+        # set_automix {on}：AUTO 自动接歌开关
+        automix = self._req_automix()
+        automix.auto_mode = bool(args.get("on"))
+        return {"on": bool(automix.auto_mode)}
+
+    def _cmd_prepare_next(self, args: dict) -> dict:
+        # prepare_next：以目标盘为 now 预备下一曲（rubberband 烘焙；依赖曲库）
+        automix = self._req_automix()
+        now_deck = getattr(self.engine, f"deck_{self._target}")
+        entry = automix.prepare_next(now_deck)
+        if entry is None:
+            raise GatewayError(E_BAD_STATE, "推荐预备失败（当前盘需 PLAYING 且已知 BPM）")
+        return {"entry": {"path": entry["path"], "name": entry.get("name", "")}}
 
 
 async def _run_main(host: str, port: int, use_fake: bool) -> None:
     # CLI 主协程：默认真引擎（真机出声）；--fake 换假引擎（无设备联调）；
     # 真引擎构造/退出全程 try/finally 保证 close（释放音频设备）
     engine = None
+    tm = None
     if not use_fake:
         from modules.engine import AudioEngine  # 重依赖延迟导入（sounddevice 设备初始化）
+        from modules.transition_manager import TransitionManager
 
         engine = AudioEngine()
-    gw = Gateway(engine=engine, use_fake=use_fake)
+        tm = TransitionManager(engine)  # mix 指令激活（prepare 依赖曲库，PL005 注入）
+    gw = Gateway(engine=engine, tm=tm, use_fake=use_fake)
     try:
         actual = await gw.serve(host, port)
         print(f"gateway ready port={actual}", flush=True)  # 就绪握手行（Tauri 读取）
