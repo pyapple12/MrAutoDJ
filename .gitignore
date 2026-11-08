@@ -194,7 +194,7 @@ __marimo__/
 .agents/
 
 # 归档与临时
-archived/
+.archived/
 .temp/
 .history/
 
@@ -204,5 +204,5 @@ opencode-go.json
 # 用户配置：运行时生成
 config/user_config.json
 
-# 音频分析缓存
-cache/
+# 缓存（分析库 / UI 贴图）
+.cache/

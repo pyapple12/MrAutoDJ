@@ -1,0 +1,61 @@
+/* 全局样式（PL003.6 hello-DJ 一屏）：深色基调配 CSS 变量 tokens（PL006 再对齐 ui.json 双主题） */
+:root {
+  --bg: #0b0e14;
+  --panel: #12161f;
+  --line: #232a38;
+  --fg: #dde3ee;
+  --fg-dim: #7a8499;
+  --accent: #2f8bff;
+  --accent2: #ff7a2f;
+
+  font-family: system-ui, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+input[type='text'] {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 7px 10px;
+  font-size: 13px;
+}
+input[type='text']:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+button {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 7px 16px;
+  font-size: 13px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button.primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}

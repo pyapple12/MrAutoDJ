@@ -13,3 +13,5 @@ pydub>=0.25.1
 audioop-lts>=0.2.0; python_version >= "3.13"
 # 分析（BPM/调性/能量）
 librosa>=0.10.0
+# WS 网关（PL003：Tauri sidecar 的 asyncio WebSocket 服务，协议见 docs/ipc_protocol.md）
+websockets>=12.0

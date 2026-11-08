@@ -533,3 +533,62 @@
 - [x] PATCH002.3 Mixer 横推同行 —— `_build_mixer_panel()`：横推标签改与横推条同行（去 xf_col 纵排）；验证：probe 几何断言 label 与 fader 同行（2026-11-07 已验证：横推标签同行（去 xf_col 纵排）；probe P3 几何断言 dy<20）
 - [x] PATCH002.4 波形网格可见度 —— `waveform_widget.paintEvent()`：下拍线 alpha 40→55 + 顶部 6px 实色刻度；验证：probe 源码断言 + 渲染不崩（2026-11-07 已验证：下拍线 alpha 40→55 + 顶部 6px 实色刻度（drawLine(x,0,x,6) 2px）；probe 源码断言 + 渲染不崩）
 - [x] PATCH002.5 检验与收尾 —— `.temp/probe_patch002.py` 全 PASS + 27 探针回归 + 冒烟 + 截图读图；提交（feat: V0.2.7.5）（2026-11-07 已验证：probe_patch002 全 PASS + 27/27 回归（6 处断言适配：patch001 列宽互斥态读数/j34 配色指纹键/fix005 适配）+ 冒烟 + 截图读图（空态构图/B 盘提示/VU 方向/网格刻度全落地）；提交 V0.2.7.5 待用户）
+
+### PL003: Sidecar 骨架与 WS 协议 v1（架构迁移 1/5） [plan#架构迁移 → z.plan.md 附录 PL003-007 总纲·一]
+
+> 目标：最小端到端链路——浏览器按钮 → 真引擎真声音 → 状态回显。架构闸门：延迟/稳定性不行则及时止损。
+> 执行约定：probe_gateway 探针先行（FakeEngine+WS 客户端）；协议文档与实现同批交付。
+
+#### 组 A：网关与协议
+
+- [x] PL003.1 gateway 骨架 —— `modules/gateway.py`（新）：asyncio + websockets 服务（动态端口）；引擎注入构造（engine 参数，测试传 FakeEngine）；连接生命周期（握手/断开清理）；`--fake` 参数（FakeEngine 无音频设备跑）；CLI 入口（`python -m modules.gateway`，main()+argparse 按规范）；验证：probe_gateway 首批断言（启动/握手/FakeEngine 模式）先红灯（2026-11-08 已验证：probe G0/G1/G5 PASS + CLI --fake 冒烟出就绪握手行）
+- [x] PL003.2 指令路由 v1 —— gateway `_routes` 路由表：load/play/pause/cue/seek/set_volume/set_xfader/mix 共 8 条 RPC（`{id,cmd,args}→{id,ok/error}`），逐条映射引擎方法（锁语义沿用）；错误码中文消息；验证：probe 断言每条指令→引擎状态变化+错误帧格式（2026-11-08 已验证：probe G2-G8 八条路由与三类错误帧 PASS）
+- [x] PL003.3 30Hz 状态推流 —— gateway tick 任务：asyncio 协程轮询（position/state/paused/vu/bpm/led 灯态两盘）推事件帧；**绝不进音频回调**；推流频率可配置（base.json gateway_tick_hz=30）；验证：probe 断言 ≥25Hz 实测频率与帧字段完整性（2026-11-08 已验证：probe G6/G9/G10 实测 1s≥20 帧 PASS；led 灯态留 PL004 随控制面全集补）
+- [x] PL003.4 协议文档 —— `docs/ipc_protocol.md`：RPC/事件/二进制帧 schema、协议版本号（protocol_version=1）、错误码表、心跳与重连语义；验证：文档与 gateway 实现逐字段核对（2026-11-08 已验证：文档按 gateway 帧结构逐字段落地，协议 v1）
+
+#### 组 B：Tauri 壳与前端骨架
+
+- [x] PL003.5 Tauri 2 壳 —— `shell/`（tauri 2 工程 + shell 插件）：dev 模式 spawn `.venv\Scripts\python.exe -m modules.gateway`；动态端口分配→就绪握手（轮询 /health）→URL 参数注入前端；sidecar 进程随窗口关闭终止；验证：tauri dev 冷启动全链（壳拉起 sidecar→前端连通）（2026-11-08 已验证：tauri dev 全链通——壳 spawn sidecar→stdout 就绪握手行解析端口→emit gateway-port→webui 连接成功；sidecar 随壳退出 kill；实现为 stdout 就绪行方案替代 /health 轮询，零 HTTP 依赖）
+- [x] PL003.6 webui 骨架 —— `webui/`（Vite+Vue3+TS）：连接状态屏（未连/已连/断线重连按钮）+ hello-DJ 一屏（加载曲/播放/CUE/BPM 读数/位置进度条——DOM 实现不追求视觉）；`webui/src/composables/useEngine.ts` 雏形（WS 连接/RPC promise 封装/tick 状态响应式存储）；验证：浏览器手动操作真机出声（2026-11-08 已验证：vue-tsc+vite build PASS；probe_gateway_audio 真机出声链路 7 项 PASS——load 真 wav→play 扬声器出声 2s→pause；重连退避 0.5s×2 上限 5s 内建 useEngine）
+- [x] PL003.7 探针与冒烟 —— `probe_gateway.py` 全 PASS（路由/频率/错误帧/断线重连/FakeEngine 全链）+ tauri dev 全链冒烟（真机出声/杀 sidecar 重连）+ 冒烟 import 增 gateway；验证：RESULT PASS + 全量回归不回归（2026-11-08 已验证：probe_gateway 19 项 PASS + probe_gateway_audio 7 项 PASS + tauri dev 全链通 + 冒烟 import gateway OK + 全量回归 34 探针全过；回归抓出两个历史遗留探针过时已修——probe_j0 J0.8 版本断言改读 base.json 免随推进维护、probe_m15 Slip 段补喂块驱动消费并改落回语义断言，engine 零改动确认非回归；杀 sidecar 重连由 useEngine 指数退避承载，深度验证入 PL007 韧性）
+
+#### 组 C：收尾
+
+- [ ] PL003.8 文档与提交 —— AGENTS 环境陷阱节登记 Node 工具链；z.plan 附录状态回写；x.progress 勾选；提交 `feat: V0.2.8.0，架构迁移一（sidecar 骨架与 WS 协议 v1）`（base.json 推进 0.2.8）
+
+### PL004: 双盘控制面全量对齐（架构迁移 2/5） [plan#架构迁移 → z.plan.md 附录总纲·二]
+
+> 对照表：main_window 现有信号接线清单（约 60 条指令）为唯一验收基准。004/005 可并行。
+
+- [ ] PL004.1 指令路由全集 —— gateway 路由表扩至控制面全集（jog 三类/keylock/keyshift/sync/循环键行/beatloop/pad 分发/EQ/trim/faderstart/tap/phones/beatfx 全参数/slip/censor/stutter/load A/B/目标盘/shift/双击装载/instant doubles…），对照清单编号落 docs/ipc_protocol.md；验证：probe 逐条断言（复用现有引擎断言库改写）
+- [ ] PL004.2 Deck 区组件 —— webui：Jog 转盘（Canvas：弯音滚轮/搓碟拖动/Vinyl/播放指示）、Pad×8 五模式+灯态、TEMPO 推子+量程循环、Keylock/Key Shift/Sync、循环键行、表演键；状态绑定 useEngine；验证：对照清单 Deck 段 100% + 操作延迟主观 <50ms
+- [ ] PL004.3 Mixer 区组件 —— TRIM/EQ×3 旋钮（拖拽+双击回中+数值提示）、VU 灯柱（tick 流驱动）、通道推子/横推、FaderStart/Tap、PHONES 预听；验证：对照清单 Mixer 段 100%
+- [ ] PL004.4 Beat FX 与推荐区 —— 效果组/通道/拍数/深度/FX ON + FX 状态小屏；推荐区 NEXT/AUTO/explanation；验证：对照清单 FX 段 100%
+- [ ] PL004.5 交互语义 —— Shift 组合键体系、快捷键（空格/Ctrl+F/Ctrl+T）、Tab 序、双击/500ms Instant Doubles 窗口；验证：probe 协议层断言 + 手动清单
+- [ ] PL004.6 验收 —— 功能对照清单逐条签收 + taste-skill app-screens 评审首轮（结构可用性，非视觉）+ 全量回归；提交 `feat: V0.2.8.1，架构迁移二（双盘控制面全量对齐）`
+
+### PL005: 曲库/分析/Automix 数据层（架构迁移 3/5） [plan#架构迁移 → z.plan.md 附录总纲·三]
+
+- [ ] PL005.1 曲库表 —— 虚拟滚动/搜索过滤/兼容标记/双击装载/拖拽到盘/Instant Doubles；folder 选择走 Tauri dialog 插件（RPC→Rust 侧 dialog）；验证：数据一致性 probe（曲库状态==引擎装载双向核对）
+- [ ] PL005.2 分析进度流 —— gateway 分析编排（后台线程 analyze_many→事件帧回填：逐曲结果/失败降级/FakeEngine 快速模式）；前端进度显示与失败态；验证：probe 断言事件帧序列与降级路径
+- [ ] PL005.3 波形数据管线 —— 服务端峰值计算（复用 _build_peaks 逻辑抽公共）→ 二进制帧（f32 LE base64 过渡）一次传输+播放头增量 tick；下拍网格/BPM 标线 Canvas 分层；验证：probe 断言峰值数组正确性 + 前端渲染抽样
+- [ ] PL005.4 Automix 面板 —— 推荐区（NEXT/AUTO/explanation）、Prepare/Mix 状态可视化（EQ 渐变进行中提示）、已播/队列展示；验证：AUTO 链协议级断言（复用 fix005 A 组场景）
+- [ ] PL005.5 验收 —— M1+M2 全功能 Web 可用清单签收 + 全量回归；提交 `feat: V0.2.8.2，架构迁移三（曲库分析数据层）`
+
+### PL006: 拟物视觉与动效体系（架构迁移 4/5） [plan#架构迁移 → z.plan.md 附录总纲·四]
+
+- [ ] PL006.1 Design tokens —— ui.json → CSS variables 构建脚本（token 同源）；theme_light 覆盖表；运行时双主题切换（对应 palette/ThemeBus 语义）；验证：token 一致性断言（ui.json 值==CSS 变量）
+- [ ] PL006.2 拟物组件库 —— `webui/src/components/skeuo/`：旋钮/推子/背光钮/灯柱/金属面板/小屏（程序化纹理：CSS+Canvas，金属各向异性/真辉光 blur 超越 QPainter）；对齐现有交互语义（拖拽方向/双击回中/禁用灰显）；验证：组件 storybook 页 + 逐组件对照 PySide6 版行为
+- [ ] PL006.3 60fps 动效 —— 转盘随播放旋转、推子跟手、VU 峰值保持衰减、转场 EQ 渐变/波形交叉可视化、加载态；DevTools performance 无掉帧；验证：动效清单逐项 + 帧率记录
+- [ ] PL006.4 布局迁移 —— splitter 比例/间距网格/尺寸分级 → CSS grid + tokens（配置键沿用 ui.json）；空态/加载态/错误态全状态覆盖；验证：布局断言（列宽比==配置）
+- [ ] PL006.5 评审与验收 —— taste-skill app-screens 评审 ≥2 轮循环 + 与 PySide6 版 before/after 并排对比；退出线 overall ≥8.0；提交 `feat: V0.2.8.3，架构迁移四（拟物视觉与动效体系）`
+
+### PL007: 迁移收口——PySide6 退役与工程体系切换（架构迁移 5/5，不含打包） [plan#架构迁移 → z.plan.md 附录总纲·五]
+
+> 开发形态即终态：gateway + tauri dev 能跑即验收；打包/分发/韧性后置迁移后阶段池。
+
+- [ ] PL007.1 双栈对照验收 —— PL004 功能清单 + PL005 数据清单 + live 听感（真曲库 AUTO 接歌/转场 EQ 渐变/Keylock/耳机预听）逐项签收——退役前置闸门；验证：签收清单归档 z.plan 附录
+- [ ] PL007.2 PySide6 退役 —— ui/ 移 archived/；requirements 剥离 PySide6（requirements-web.txt 或主清单拆分）；main.py GUI 分发改 gateway 入口（--gui 启 tauri dev 提示/直接 -m modules.gateway）；验证：`git grep PySide6` 仅剩 archived//文档历史 + pip 装机无 GUI 依赖
+- [ ] PL007.3 探针体系切换 —— 引擎/协议探针为门禁主力清单固化（AGENTS 门禁节重排：引擎探针+协议探针+vitest+tauri dev 冒烟）；PySide6 UI 探针（p5/p6/j0/pl001/patch001/patch002/fix004 部分）归档说明（行为断言由协议探针承接映射表）；验证：新门禁全绿跑通
+- [ ] PL007.4 webui 测试基线 —— vitest 单测（useEngine/tokens 脚本等 composables 逻辑层）+ 组件冒烟（挂载/基本交互）；只建基线不追覆盖；验证：`npm test` 绿
+- [ ] PL007.5 文档收口与提交 —— AGENTS.md（工具链/门禁/冒烟清单）、README（架构图/运行方式 dev 形态）、z.plan 里程碑表加"UI 架构迁移"条目、五附录状态回写；提交 `feat: V0.2.9.0，架构迁移五（PySide6 退役与工程体系切换）`（base.json 推进 0.2.9）

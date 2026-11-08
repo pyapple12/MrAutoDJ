@@ -902,3 +902,93 @@ _mix_source_chunk 推进-消费恒等零漂移（同式同 frames）；beat_fram
 ### 验证
 
 - `.temp/probe_patch002.py`：空库切页断言 / B 盘提示存储断言 / 横推同行几何断言 / 网格绘制断言 + 双主题 grab 不崩；全量回归 + 截图
+
+---
+
+## 附录 PL003-007 总纲：Tauri 2 + Web 前端 + Python Sidecar 架构迁移（2026-11-07 立项）
+
+> 背景：PySide6 拟物化受限于前端表现力（三轮 UI 评审 7.4 封顶），用户定案迁移至 Tauri 2 + Web（Vue3+TS+Vite）+ Python sidecar；**引擎资产（modules/ 五轮审计代码）100% 保留**，仅替换 UI 层与进程壳。
+> 边界（用户定案）：5 个 PL 完成即**迁移完成**（Web 全功能 + 旧栈退役 + 工程门禁切换）；性能优化/深度测试/韧性/打包发布全部后置为迁移后阶段，不占本五案。
+> 状态：PL003 实施中（2026-11-08：gateway/协议文档/webui 骨架完成，probe_gateway 19 项 PASS；Tauri 壳编译验证中）；PL004-007 依次排期（004/005 可并行）。
+
+### 〇、总体架构与贯穿决策
+
+```
+Tauri 2 壳（Rust 零业务：窗口/文件对话框/sidecar 进程管理）
+ └─ WebView2 → webui/（Vue3+TS+Vite：拟物 UI、Canvas 波形/转盘、60fps 动效）
+      ↕ WebSocket（127.0.0.1 动态端口：RPC 指令帧 + 事件推流帧 + 二进制峰值帧）
+ └─ spawn → Python sidecar（开发态 = .venv 解释器；打包态后续阶段）
+      └─ modules/gateway.py（唯一新增模块：asyncio WS 服务）
+         ├─ 指令路由（→ 现有引擎方法，modules/* 零改动）
+         ├─ 30Hz 状态推流（asyncio 轮询，绝不进音频回调线程）
+         └─ 数据端点（波形峰值/曲库/分析进度/推荐）
+```
+
+贯穿决策：
+1. **引擎零改动**——现有"UI 只发指令"纪律兑现：MainWindow 换 WS 网关，modules/ 不动
+2. **协议双通道**——RPC 帧 `{id, cmd, args}→{id, ok/error}` + 事件帧（tick/波形/分析）；大数组二进制帧（f32 LE）
+3. **假引擎注入复用**——探针已验证的 FakeEngine 模式用于网关无头测试（UI 层首次获得稳定回归手段）
+4. **版本单一来源不变**——base.json `version` 仍是唯一源
+5. **双栈并存渐进**——PL003-006 期间 PySide6 旧版保留可对照，PL007 才退役
+
+### 一、PL003 — Sidecar 骨架与 WS 协议 v1（架构闸门）
+
+> 目标：最小端到端链路——浏览器按钮 → 真引擎真声音 → 状态回显。可行性验证，后续一切基座。
+
+- `modules/gateway.py`（新）：asyncio + websockets 轻量服务；引擎注入（构造传 engine / 测试传 FakeEngine）；指令路由首批 8 条（load/play/pause/cue/seek/volume/xfader/mix）；30Hz tick 推流任务（asyncio 轮询 deck.position/state/vu_levels，不进音频回调）；`--fake` 参数无音频设备可跑
+- `docs/ipc_protocol.md`：帧 schema（RPC/事件/二进制峰值）+ 协议版本 + 错误码
+- `shell/`（Tauri 2 + shell 插件）：dev 模式 spawn `.venv python -m modules.gateway`；动态端口 + 就绪握手 + 前端注入
+- `webui/`（Vite+Vue3+TS 骨架）：连接状态屏 + hello-DJ 一屏（加载/播放/CUE/BPM/位置条）
+- 验证：`probe_gateway.py`（FakeEngine+WS 客户端：路由/频率≥25Hz/错误帧/断线重连）+ tauri dev 全链冒烟真机出声
+- 退出标准：真机出声、30Hz 流稳定、杀 sidecar 前端可重连
+
+### 二、PL004 — 双盘控制面全量对齐
+
+> 目标：控制面平价——以 main_window 现有信号接线清单为唯一对照表逐条迁移，漏一条不算完成。
+
+- Deck 区：Jog 转盘（Canvas 滚轮弯音/拖动搓碟/Vinyl/播放指示）、Pad 8 键五模式+灯态、TEMPO+量程、Keylock/Key Shift/Sync、循环键行、Slip/Censor/Stutter
+- Mixer 区：TRIM/EQ×3 旋钮（拖拽+双击回中）、VU 灯柱、通道推子/横推、FaderStart/Tap、PHONES 预听
+- Beat FX：效果组/通道/拍数/深度/ON + FX 状态小屏；Effects 推荐区（NEXT/AUTO）
+- 指令路由表扩至全集；Shift 语义、快捷键（空格/Ctrl+F/Ctrl+T）、Tab 序
+- `webui/src/composables/useEngine.ts`：状态→组件响应式绑定层（对应现 _tick 职责）
+- 验证：协议一致性探针（每指令→引擎状态断言，复用现有断言库改写）+ taste-skill app-screens 评审首轮
+- 退出标准：功能对照清单 100%；操作延迟主观 <50ms
+
+### 三、PL005 — 曲库/分析/Automix 数据层
+
+> 目标：数据面平价——曲库、分析管线、M2 自动编排全量上 Web。
+
+- 曲库表：虚拟滚动/搜索/兼容标记/双击装载/拖拽到盘、Instant Doubles
+- 分析进度流（事件帧推送替代 QueuedConnection 回填）、失败降级展示
+- 波形数据管线：服务端峰值计算（复用 _build_peaks 逻辑）→ 二进制帧一次传输+播放头增量；下拍网格/BPM 标线 Canvas 分层
+- Automix：推荐区（NEXT/AUTO/explanation）、Prepare/Mix 转场状态可视化
+- Tauri dialog 插件接文件夹选择
+- 验证：数据一致性探针（曲库状态==引擎装载状态双向核对）+ 波形渲染断言
+- 退出标准：M1+M2 全功能 Web 面可用，PySide6 仅剩可对照旧版
+
+### 四、PL006 — 拟物视觉与动效体系
+
+> 目标：迁移初衷兑现——视觉质变（唯一"新能力"PL）。
+
+- Design tokens：ui.json → CSS variables（含 theme_light 覆盖），运行时双主题切换（对应 palette/ThemeBus 语义）
+- 拟物组件库 `webui/src/components/skeuo/`：旋钮/推子/背光钮/灯柱/金属面板（程序化纹理超越 QPainter：真辉光 blur、金属各向异性）
+- 60fps 动效：转盘随播放旋转、推子跟手、VU 峰值保持衰减、转场 EQ 渐变/波形交叉可视化、加载态
+- 布局配置化迁移（splitter 比例/间距网格/尺寸分级 → CSS grid + tokens）
+- 验证：taste-skill 评审 ≥2 轮 + 与 PySide6 版 before/after 并排对比
+- 退出标准：评审 overall ≥8.0（现 7.4）；动效无掉帧
+
+### 五、PL007 — 迁移收口：PySide6 退役与工程体系切换（不含打包）
+
+> 目标：Web 面成为唯一前端，工程门禁切换到新栈。开发形态即终态（gateway + tauri dev 能跑即验收）。
+
+- 双栈对照验收：PL004 功能清单 + PL005 数据清单 + live 听感（AUTO 接歌/转场 EQ/Keylock）逐项签收——退役前置闸门
+- PySide6 退役：ui/ 移 archived/；requirements 剥离 PySide6；main.py GUI 分发改 gateway 入口
+- 探针体系切换：引擎/协议探针为门禁主力；PySide6 UI 探针随旧栈归档（行为断言已由协议探针在 PL004/005 承接）
+- webui 测试基线：vitest 单测（composables 逻辑层）+ 组件冒烟——只建基线
+- AGENTS.md 工作流更新：Node 工具链进环境陷阱；门禁重排（引擎探针+协议探针+vitest+tauri dev 冒烟）；冒烟清单去 PySide6 加 gateway
+- 验证：退役后全量回归 + `git grep PySide6` 仅剩 archived//文档历史 + tauri dev 冷启动全流程
+- 退出标准：对照清单签收；PySide6 出 requirements；AGENTS/README/z.plan 反映新栈
+
+### 六、迁移后阶段池（不占本五案，届时按需立项）
+
+性能调优（指令往返/波形压缩/60Hz 流）｜深度测试（组件/协议矩阵/故障注入）｜韧性（心跳/自动重启/重连 UI 完整化）｜打包发布（PyInstaller sidecar + Tauri bundler + 安装包）｜视觉精修迭代

@@ -1,5 +1,5 @@
 # 程序化贴图离线渲染 + PNG 磁盘缓存（J3 批次 3 A 路线）
-# 把 PanelFrame 的程序化金属绘制离线渲染为 PNG（cache/ui_textures/，已 gitignore），
+# 把 PanelFrame 的程序化金属绘制离线渲染为 PNG（.cache/ui_textures/，已 gitignore），
 # 运行时按 (名称, 主题, 尺寸) 键控加载——零素材复用现有绘制语言，一次渲染终身使用
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ _MEM: dict[str, QPixmap] = {}
 
 
 def _dir() -> Path:
-    # 贴图缓存目录：项目内 cache/ui_textures/（cache/ 已 gitignore，可随时重建）
-    return get_project_root() / "cache" / "ui_textures"
+    # 贴图缓存目录：项目内 .cache/ui_textures/（.cache/ 已 gitignore，可随时重建）
+    return get_project_root() / ".cache" / "ui_textures"
 
 
 def _render_brushed(w: int, h: int) -> QPixmap:

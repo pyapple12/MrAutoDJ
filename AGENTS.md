@@ -8,8 +8,9 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 
 - 入口 `main.py`：GUI 为默认模式；版本单一来源在 `config/static/base.json` 的 `version` 字段（三段式 `X.Y.Z`），其他模块用 `get_static_config().base["version"]` 引用
 - **提交前全量门禁（硬性工作流）**：改动涉及 `modules/`、`ui/`、`utils/`、`config/` 的提交，提交前必须跑全量探针回归（`.temp/` 下既有 probe 逐个 RESULT PASS）+ 冒烟 import（下方命令清单）+ 涉及视觉的出截图核对；不通过不得宣称完成，环境缺依赖先报告用户、不得静默跳过
-- 没有测试/lint 命令。改动后验证（冒烟 import 全模块清单——FIX005.15 补全，新增模块须同步回填）：`.\.venv\Scripts\python.exe -c "import main, modules.engine, modules.analyzer, modules.library, modules.automix, modules.radio, modules.stretcher, modules.transition, modules.transition_manager, config.settings, config.static.static_config, ui.main_window, ui.beat_fx_widget, ui.deck_widget, ui.jog_wheel, ui.pad_widget, ui.palette, ui.scale, ui.shift_state, ui.themes, ui.waveform_widget, ui.widgets._skins, ui.widgets._textures, ui.widgets.fader_slider, ui.widgets.glow_button, ui.widgets.led_strip, ui.widgets.mini_display, ui.widgets.panel_frame, ui.widgets.rotary_knob, utils.logger, utils.file_utils, utils.retry, utils.convert, utils.audio_decode"`。不要直接跑 GUI 验证（会弹窗阻塞）；涉及解码链路（pydub 为延迟导入，import 冒烟测不出）另跑真实解码断言：合成 wav → `decode_audio` 查幅度
+- 没有测试/lint 命令。改动后验证（冒烟 import 全模块清单——FIX005.15 补全，新增模块须同步回填）：`.\.venv\Scripts\python.exe -c "import main, modules.engine, modules.gateway, modules.analyzer, modules.library, modules.automix, modules.radio, modules.stretcher, modules.transition, modules.transition_manager, config.settings, config.static.static_config, ui.main_window, ui.beat_fx_widget, ui.deck_widget, ui.jog_wheel, ui.pad_widget, ui.palette, ui.scale, ui.shift_state, ui.themes, ui.waveform_widget, ui.widgets._skins, ui.widgets._textures, ui.widgets.fader_slider, ui.widgets.glow_button, ui.widgets.led_strip, ui.widgets.mini_display, ui.widgets.panel_frame, ui.widgets.rotary_knob, utils.logger, utils.file_utils, utils.retry, utils.convert, utils.audio_decode"`。不要直接跑 GUI 验证（会弹窗阻塞）；涉及解码链路（pydub 为延迟导入，import 冒烟测不出）另跑真实解码断言：合成 wav → `decode_audio` 查幅度
 - GUI 无头初始化验证（不弹窗）：`$env:QT_QPA_PLATFORM="offscreen"; .\.venv\Scripts\python.exe -c "from PySide6.QtWidgets import QApplication; from ui.main_window import MainWindow; app = QApplication([]); w = MainWindow(); print('GUI init OK')"`
+- 架构迁移三件套（PL003 起）：WS 网关 `.\.venv\Scripts\python.exe -m modules.gateway`（`--fake` 无设备；stdout 输出 `gateway ready port=<N>` 就绪握手行，协议权威文档 `docs/ipc_protocol.md`）；webui 前端 `webui/`（`npm run dev` 开发 / `npm run build` 含 vue-tsc 类型检查门禁）；Tauri 壳 `shell/`（`npm run dev` = tauri dev，需先起 webui dev server；`cargo build` 在 `shell/src-tauri/` 单独编译验证）
 - 依赖（`requirements.txt`）：PySide6、sounddevice、librosa 等，按需添加（见 z.plan.md 技术栈）
 
 ## 环境陷阱
@@ -19,6 +20,7 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 - 音频设备：sounddevice 在 WSL 下无设备（需 WSLg）；Windows 原生运行
 - **Mimosa 安全钩子**（2026-11-05 实测沉淀）：① Bash 内直接写源码/配置（`sed -i`/`cp`/重定向等）会被 PreToolUse 钩子拒绝——**修改既有文件一律用 edit 类工具精确替换**，钩子借此对候选代码做安全检查；② `git commit` 前钩子自动扫描改动，高危发现会强制拦截（如路径穿越类模式）——修复后重试即可通过，软警告（扫描结论不完整）按兼容策略放行但不得宣称"项目安全"；③ 补跑完整扫描用 Mimosa 扫描工具，报告落仓库外
 - 探针/验证脚本对音频设备有依赖（VU 采集、输出流）——设备被占用或瞬时不可用会出现偶发 FAIL，先复跑一次排除设备争用再判代码回归
+- **Node/Rust 工具链**（PL003 起前端迁移依赖）：webui 需 Node ≥20 + npm；shell 壳需 Rust ≥1.77 + cargo（Tauri 2 依赖 WebView2，Win10/11 自带）。`webui/node_modules`、`shell/node_modules`、`shell/src-tauri/target` 均不入库；换机器后 `webui/`、`shell/` 各自 `npm install` 重建，Rust 依赖由 cargo 首次构建自动拉取
 
 ## 结构与约定
 
@@ -97,6 +99,8 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 - 保留旧数据：刷新失败保留旧视图，成功后视图才替换
 - 只读防误写：分析缓存数据库**消费侧**只读（未来任何外部消费方必须开 `file:...?mode=ro` + uri=True 只读连接）；缓存库当前仅经 AnalysisCache 单一连接读写（FIX005/A5 裁决对齐实现——原"专用短连接"表述与实现不符）
 - 渲染进度回调异常静默忽略（FIX005/S2 登记，stretcher `_safe_progress`）：场景——rubberband 渲染的进度回调（UI 层注入）抛错；降级行为——异常吞掉、渲染本体照常完成；理由——进度显示是装饰层，回调失败不得杀死渲染线程
+- WS 网关慢客户端丢 tick 帧（PL003 登记，gateway `_tick_loop`/`_respond`）：场景——客户端消费慢于 30Hz 推流、出站队列（64 帧）满；降级行为——tick 帧静默丢弃（状态可自愈，下一帧即最新），推送时钟落后超一个周期重对齐防雪崩，RPC 响应不丢（满时记 warning）；理由——状态推流是装饰层，丢帧优于阻塞推流拖垮全部客户端
+- WS 网关无 cmd 入站帧静默忽略（PL003 登记，gateway `_on_message`）：场景——非 RPC 噪声帧/未来协议扩展帧；降级行为——忽略不回错误；理由——协议向前兼容（后续事件订阅等帧型无需回错误），坏 JSON 仍有 `bad_json` 错误帧不在此列
 - **容错登记制**（2026-11-05 对齐 CapsulePulse）：以上降级条目即本项目的容错白名单——**新增任何静默兜底/降级必须先在此登记**，写明场景、降级行为与理由三要素；未登记的静默吞错一律按规范违反处理（错误要么向上传播、要么明确记录）
 
 ### 函数注释规则
@@ -136,7 +140,7 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 
 ## Git 注意
 
-- `.gitignore` 忽略 `.venv`、`.reference/`、`archived/`、`.temp/`、`.opencode/`、`.mimosa/`（安全扫描缓存）、`.agents/`（项目 skill，本地工具不入库）、`opencode-go.json`（含配额凭据）、`config/user_config.json`、`cache/` —— 对这些文件的修改不会出现在 `git status` 中；`AGENTS.md` 已纳入版本控制
+- `.gitignore` 忽略 `.venv`、`.reference/`、`.archived/`（UI 归档副本）、`.temp/`、`.opencode/`、`.mimosa/`（安全扫描缓存）、`.agents/`（项目 skill，本地工具不入库）、`opencode-go.json`（含配额凭据）、`config/user_config.json`、`.cache/`（分析缓存库 + UI 贴图）—— 对这些文件的修改不会出现在 `git status` 中；`AGENTS.md` 已纳入版本控制
 - 严禁将 API key、authCookie、workspaceId 等凭据提交到仓库
 - 未经用户明确要求，不得擅自执行 `git add`、`git commit` 或任何其他 Git 写操作
 - **远程与身份**：远程 `git@takechance:pyapple12/MrAutoDJ.git`（SSH 别名 `takechance` = pyapple12 账号，与 CapsulePulse 同款别名方案）；仓库级身份 `git config user.name pyapple12` + `user.email takechance_bao@188.com`

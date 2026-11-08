@@ -1,0 +1,12 @@
+{
+  "name": "mrautodj-shell",
+  "private": true,
+  "version": "0.2.8",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

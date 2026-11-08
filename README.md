@@ -1,6 +1,6 @@
 # MrAutoDJ —— 虚拟 DJ 台与 AI 电台
 
-[![Version](https://img.shields.io/badge/Version-0.2.7-blue.svg)](config/static/base.json)
+[![Version](https://img.shields.io/badge/Version-0.2.8-blue.svg)](config/static/base.json)
 [![Python](https://img.shields.io/badge/Python-3.14+-green.svg)](https://www.python.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -56,7 +56,7 @@ GUI 基于 PySide6，音频引擎基于 python-sounddevice 实时回调，分析
   - 批次 0 UI 优化：布局/间距/尺寸全部配置化（ui.json）、部件大小分级、死控件灰显、数值 Tooltip、FX 状态小屏、快捷键（空格播放/Ctrl+F/Ctrl+T）
   - 批次 1 功能补齐：TEMPO 实时变速（P4 闭环）、Keylock 变速不变调（rubberband 后台重渲染）、Key Shift 真实变调、Beat Sync、循环 IN/OUT/4BEAT/减半/加倍、Beat FX 拍数接线 + AUTO/TAP/CH 通道、耳机预听（CUE A/B）
   - 批次 2 Theme 化：token 运行期动态化（ui/palette.py）、dark/light 双主题、Ctrl+T 无重启切换
-  - 批次 3 贴图 A 路线：程序化拉丝金属纹理 PNG 磁盘缓存（cache/ui_textures/，按主题/分辨率键控）
+  - 批次 3 贴图 A 路线：程序化拉丝金属纹理 PNG 磁盘缓存（.cache/ui_textures/，按主题/分辨率键控）
   - 批次 4 大小缩放：ui_scale 全局缩放因子（控件/间距统一乘系数）
 - **AI 自动 DJ（M2，V0.2.7.0）**：
   - 兼容性评分：BPM 八度折叠 + Camelot 调和轮盘打分表 + 能量曲线 + 音色谱概要（三维归一），加权聚合可解释（explanation/warnings）

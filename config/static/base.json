@@ -1,5 +1,6 @@
 {
-  "version": "0.2.7",
+  "version": "0.2.8",
+  "gateway_tick_hz": 30,
   "window_width": 1600,
   "window_height": 800,
   "sample_rate": 44100,
@@ -41,7 +42,7 @@
   "log_dir": "",
   "log_max_bytes": 5242880,
   "log_backup_count": 5,
-  "cache_path": "cache/analysis.sqlite",
+  "cache_path": ".cache/analysis.sqlite",
   "user_config_path": "config/user_config.json",
   "default_theme": "dark",
   "themes": ["light", "dark"]

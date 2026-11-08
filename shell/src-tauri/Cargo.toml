@@ -1,0 +1,18 @@
+[package]
+name = "mrautodj-shell"
+version = "0.2.8"
+edition = "2021"
+description = "MrAutoDJ Tauri 壳（零业务：spawn sidecar + 端口握手 + 退出清理）"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true
