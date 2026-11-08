@@ -6,12 +6,12 @@ Python 桌面 DJ 应用，三步路线：虚拟 DJ 台（双打碟机/波形/EQ/
 
 ## 运行与验证
 
-- 入口 `main.py`：GUI 为默认模式；版本单一来源在 `config/static/base.json` 的 `version` 字段（三段式 `X.Y.Z`），其他模块用 `get_static_config().base["version"]` 引用
-- **提交前全量门禁（硬性工作流）**：改动涉及 `modules/`、`ui/`、`utils/`、`config/` 的提交，提交前必须跑全量探针回归（`.temp/` 下既有 probe 逐个 RESULT PASS）+ 冒烟 import（下方命令清单）+ 涉及视觉的出截图核对；不通过不得宣称完成，环境缺依赖先报告用户、不得静默跳过
-- 没有测试/lint 命令。改动后验证（冒烟 import 全模块清单——FIX005.15 补全，新增模块须同步回填）：`.\.venv\Scripts\python.exe -c "import main, modules.engine, modules.gateway, modules.waveform_data, modules.analyzer, modules.library, modules.automix, modules.radio, modules.stretcher, modules.transition, modules.transition_manager, config.settings, config.static.static_config, ui.main_window, ui.beat_fx_widget, ui.deck_widget, ui.jog_wheel, ui.pad_widget, ui.palette, ui.scale, ui.shift_state, ui.themes, ui.waveform_widget, ui.widgets._skins, ui.widgets._textures, ui.widgets.fader_slider, ui.widgets.glow_button, ui.widgets.led_strip, ui.widgets.mini_display, ui.widgets.panel_frame, ui.widgets.rotary_knob, utils.logger, utils.file_utils, utils.retry, utils.convert, utils.audio_decode"`。不要直接跑 GUI 验证（会弹窗阻塞）；涉及解码链路（pydub 为延迟导入，import 冒烟测不出）另跑真实解码断言：合成 wav → `decode_audio` 查幅度
-- GUI 无头初始化验证（不弹窗）：`$env:QT_QPA_PLATFORM="offscreen"; .\.venv\Scripts\python.exe -c "from PySide6.QtWidgets import QApplication; from ui.main_window import MainWindow; app = QApplication([]); w = MainWindow(); print('GUI init OK')"`
-- 架构迁移三件套（PL003 起）：WS 网关 `.\.venv\Scripts\python.exe -m modules.gateway`（`--fake` 无设备；stdout 输出 `gateway ready port=<N>` 就绪握手行，协议权威文档 `docs/ipc_protocol.md`）；webui 前端 `webui/`（`npm run dev` 开发 / `npm run build` 含 vue-tsc 类型检查门禁）；Tauri 壳 `shell/`（`npm run dev` = tauri dev，需先起 webui dev server；`cargo build` 在 `shell/src-tauri/` 单独编译验证）
-- 依赖（`requirements.txt`）：PySide6、sounddevice、librosa 等，按需添加（见 z.plan.md 技术栈）
+- 入口 `main.py`：WS 网关 sidecar 为默认模式（PL007 起；`--gui` 打印退役提示，旧栈在 `.archived/ui-0.2.8/`）；桌面完整形态 = `shell/` tauri dev（壳 spawn 网关 + webui 前端）；版本单一来源在 `config/static/base.json` 的 `version` 字段（三段式 `X.Y.Z`），其他模块用 `get_static_config().base["version"]` 引用
+- **提交前全量门禁（硬性工作流，PL007.3 起新体系）**：改动涉及 `modules/`、`webui/`、`utils/`、`config/` 的提交，提交前必须跑——① 引擎/协议探针 8 个逐个 PASS：`.temp/` 下 `probe_engine / probe_m15 / probe_p1 / probe_pl002_score / probe_pl002_set / probe_gateway / probe_gateway_audio / probe_pl007_gate`（真引擎出声类在设备占用时复跑一次再判）；② 冒烟 import（下方清单）；③ webui 改动加 `npm run build`（vue-tsc 门禁）+ `npm test`（vitest 基线）；④ 涉及视觉的出截图核对。不通过不得宣称完成，环境缺依赖先报告用户、不得静默跳过。退役探针（PySide6 UI 层 28 个）随旧栈归档于 `.archived/probes/`——其行为断言已由协议探针承接（pad/TEMPO/循环/表演键→pl007_gate G9-G17；波形/分析/曲库→gateway G21-G25+gateway_audio A7）
+- 没有测试/lint 命令。改动后验证（冒烟 import 清单——PL007.2 起去 ui.*，新增模块须同步回填）：`.\.venv\Scripts\python.exe -c "import main, modules.engine, modules.gateway, modules.waveform_data, modules.analyzer, modules.library, modules.automix, modules.radio, modules.stretcher, modules.transition, modules.transition_manager, config.settings, config.static.static_config, utils.logger, utils.file_utils, utils.retry, utils.convert, utils.audio_decode"`。涉及解码链路（pydub 为延迟导入，import 冒烟测不出）另跑真实解码断言：合成 wav → `decode_audio` 查幅度
+- GUI 无头验证已随 PySide6 退役移除（PL007.2；旧栈完整副本与 UI 探针在 `.archived/`）
+- 架构迁移三件套（PL003 起）：WS 网关 `.\.venv\Scripts\python.exe -m modules.gateway`（`--fake` 无设备；stdout 输出 `gateway ready port=<N>` 就绪握手行，协议权威文档 `docs/ipc_protocol.md`；`main.py` 为等价转发入口）；webui 前端 `webui/`（`npm run dev` 开发 / `npm run build` 含 vue-tsc 类型检查门禁 / `npm test` vitest 基线）；Tauri 壳 `shell/`（`npm run dev` = tauri dev，需先起 webui dev server；`cargo build` 在 `shell/src-tauri/` 单独编译验证）
+- 依赖（`requirements.txt`）：sounddevice、numpy、librosa、websockets 等（PL007.2 起 PySide6 已剥离；见 z.plan.md 技术栈）
 
 ## 环境陷阱
 

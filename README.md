@@ -1,6 +1,6 @@
 # MrAutoDJ —— 虚拟 DJ 台与 AI 电台
 
-[![Version](https://img.shields.io/badge/Version-0.2.8-blue.svg)](config/static/base.json)
+[![Version](https://img.shields.io/badge/Version-0.2.9-blue.svg)](config/static/base.json)
 [![Python](https://img.shields.io/badge/Python-3.14+-green.svg)](https://www.python.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -8,13 +8,13 @@
 
 ## 项目简介
 
-Python 桌面 DJ 应用，三步路线：
+桌面 DJ 应用（Tauri 2 + Web 前端 + Python sidecar），三步路线：
 
 1. **虚拟 DJ 台**：双打碟机、波形显示、三频 EQ、横推混音、变速与 Keylock
 2. **AI 自动 DJ**：调和混音（Camelot）、节拍对齐自动转场、Set 规划
 3. **Claude 电台**：LLM 自动报幕与接歌、直播间点歌互动
 
-GUI 基于 PySide6，音频引擎基于 python-sounddevice 实时回调，分析基于 librosa。
+架构（V0.2.9 起）：`shell/` Tauri 2 壳（零业务）→ `webui/` Vue3+TS 拟物前端 → WebSocket（38 条指令 + 30Hz 推流 + 二进制波形帧，协议见 `docs/ipc_protocol.md`）→ `modules/gateway.py` sidecar（音频引擎 python-sounddevice 实时回调，分析 librosa）。旧 PySide6 栈已退役归档（`.archived/ui-0.2.8/`）。
 
 ## 目录
 
@@ -91,22 +91,33 @@ py -3.14 -m venv .venv
 
 ## 使用说明
 
-### 图形界面（默认）
+### 桌面形态（Tauri dev，完整体验）
 
 ```bash
-.\.venv\Scripts\python.exe main.py
-
-# 查看版本
-.\.venv\Scripts\python.exe main.py --version
+# 终端 1：webui 前端
+cd webui && npm install && npm run dev
+# 终端 2：Tauri 壳（自动 spawn Python sidecar + 端口握手）
+cd shell && npm install && npm run dev
 ```
 
-### 界面操作（V0.22 拟物五列布局）
+### 网关单跑（Python 侧开发）
 
-- **BROWSE 顶栏**：LOAD A / LOAD B（加载选中曲到指定盘）、搜索曲库、打开文件夹、目标盘切换、SHIFT
-- **曲库**：双击曲目加载到目标盘（500ms 内再双击 = Instant Doubles 复制到另一盘）
-- **双 Deck**：播放/CUE/循环/Beatloop/Pitch；右侧 **Jog 转盘**（外圈滚轮=弯音、顶面按住拖动=搓碟、SHIFT+滚=高速搜索、Vinyl 勾选切换）+ **Pad 打击垫**（5 模式：Hot Cue/Beat Loop/Beat Jump/Sampler/Key Shift）+ Slip/Censor/Stutter 表演键
-- **MIXER**：TRIM 预增益、三频 EQ、VU 电平、Fader Start（推子联动播放）、Tap BPM、横推、主音量
-- **EFFECTS**：Beat FX 面板（选效果 → 拉 DEPTH → 点 FX ON 生效）、Prepare 来曲 → Mix Now（变速转场）
+```bash
+.\.venv\Scripts\python.exe main.py            # = python -m modules.gateway（动态端口）
+.\.venv\Scripts\python.exe main.py --fake     # 假引擎（无音频设备联调）
+.\.venv\Scripts\python.exe main.py --version
+
+# 浏览器直连前端（不装 Tauri 也能玩）：webui dev 后打开 http://localhost:5173/?gw=<端口>
+```
+
+### 界面操作
+
+- **曲库**：选目录扫描（分析进度实时回填）、双击装载到目标盘（500ms 内再双击 = Instant Doubles）、拖拽到指定盘、搜索过滤、兼容标记
+- **双 Deck**：播放/CUE/进度、Canvas 转盘（按住拖=搓碟、滚轮=弯音、Shift+拖=搜索）、TEMPO 推子+量程循环、Keylock/Key Shift/Sync、循环键行（IN/OUT/4BEAT/减半/加倍）、表演键（SLIP/CENSOR/STUTTER）、Pad×8 五模式（Hot Cue/Beat Loop/Beat Jump/Sampler/Key Shift）、Instant Doubles
+- **MIXER**：TRIM/三频 EQ 旋钮（双击回中）、VU 灯柱（峰值保持）、横推、主音量、Fader Start、Tap、CUE 监听独占切换
+- **BEAT FX**：HPF/LPF/Trans/Echo/Delay、通道 1/2/1+2、拍数、深度旋钮、FX ON、AUTO/TAP、状态小屏
+- **推荐/AUTO**：NEXT 推荐并预备（兼容评分+理由）、MIX 立即转场、AUTO 自动接歌、已播队列
+- 双主题（Ctrl+T）、Shift 键体系、空格=目标盘播放/暂停
 
 ### 命令行模式
 
@@ -121,9 +132,11 @@ py -3.14 -m venv .venv
 
 ```
 MrAutoDJ/
-├── main.py                    # 主入口：GUI 分发，版本号单一来源（base.json version 字段）
+├── main.py                    # 主入口：gateway sidecar 分发（--gui=退役提示），版本单一来源
 ├── modules/                   # 业务核心层（无 GUI 依赖，可独立测试）
 │   ├── engine.py              # 音频引擎：双 deck / 混音 / EQ / 横推 / Jog / Hot Cue / Slip / Sampler / Beat FX
+│   ├── gateway.py             # WS 网关 sidecar：38 条指令路由 / 30Hz 推流 / 事件帧 / 二进制波形帧
+│   ├── waveform_data.py       # 波形峰值公共算法（UI 与网关单源）+ 二进制帧打包
 │   ├── analyzer.py            # 曲目分析：BPM / 调性 / 能量 / 拍点（librosa）
 │   ├── library.py             # 曲库：扫描 / 分析缓存（SQLite 只读）
 │   ├── audio_decode.py        # 统一音频解码（pydub + 位深归一化，engine/analyzer 共用）
@@ -131,7 +144,7 @@ MrAutoDJ/
 │   ├── stretcher.py           # 变速/变调预渲染（rubberband 封装）
 │   ├── transition_manager.py  # 转场编排（prepare/mix_now/Key Shift 预渲染）
 │   ├── automix.py             # AI 自动编排：兼容性评分 / 转场计划 / Set 规划
-│   └── radio.py               # 电台调度：LLM 导演 / 混合播放队列 / 点歌
+│   └── radio.py               # 电台调度：LLM 导演 / 混合播放队列 / 点歌（暂缓）
 ├── config/
 │   ├── settings.py            # 用户配置读写（AppConfig，config/user_config.json）
 │   └── static/                # 静态配置（只读，json 驱动）
@@ -139,30 +152,26 @@ MrAutoDJ/
 │       ├── config.json        # 引导映射表（base.json / ui.json 分类对应）
 │       ├── base.json          # 应用参数（版本/采样率/块大小/缓存路径等）
 │       └── ui.json            # UI 参数（颜色/阈值/表头）
-├── ui/                        # GUI 层（PySide6）
-│   ├── main_window.py         # 主窗口（五列布局：LIBRARY | DECK A | MIXER | DECK B | EFFECTS）
-│   ├── deck_widget.py         # 打碟机控件
-│   ├── waveform_widget.py     # 波形绘制
-│   ├── jog_wheel.py           # Jog 转盘（弯音/搓碟/搜索/Vinyl/中心屏）
-│   ├── pad_widget.py          # 打击垫（5 模式 + 灯态）
-│   ├── beat_fx_widget.py      # Beat FX 面板
-│   ├── shift_state.py         # 全局 SHIFT 修饰状态
-│   ├── themes.py              # 主题 QSS
-│   └── widgets/               # 拟物原语控件库（QPainter 自绘，零业务依赖）
-│       ├── panel_frame.py     # 面板容器（渐变+高光+丝印标题）
-│       ├── rotary_knob.py     # 旋钮（刻度环+指针，拖拽/滚轮/双击复位）
-│       ├── glow_button.py     # 背光按钮（辉光+LED 灯态+模式色）
-│       ├── fader_slider.py    # 推子（凹槽+金属帽）
-│       ├── led_strip.py       # LED 灯柱（绿黄红分带）
-│       └── mini_display.py    # 小屏（黑底绿字）
+├── webui/                     # 前端（Vue3+TS+Vite，拟物 UI：skeuo/ 组件库 + Canvas 波形/转盘）
+│   └── src/
+│       ├── composables/       # useEngine（WS 协议/状态）/ useShift / useTheme
+│       ├── components/        # DeckPanel / MixerPanel / BeatFxPanel / AutomixPanel / LibraryPanel
+│       └── components/skeuo/  # 拟物组件库（MetalPanel/BacklitButton/Knob/Fader/VuMeter/MiniDisplay/JogWheel）
+├── shell/                     # Tauri 2 壳（Rust 零业务：spawn sidecar + 端口握手 + 退出清理）
+├── docs/
+│   ├── ipc_protocol.md        # WS 协议 v1.2 权威定义（38 条指令/事件帧/二进制峰值帧）
+│   └── ui_layout.md           # 旧栈布局规格（历史）
+├── tools/
+│   ├── gen_webui_tokens.py    # ui.json → tokens.css 设计 token 生成器（双主题单源）
+│   └── rubberband/            # 内置变速引擎（GPL 便携构建，兜底方案，随仓库分发）
 ├── data/                      # 静态数据（预留）
 ├── utils/                     # 通用工具（零业务依赖）
 │   ├── logger.py              # 统一日志（控制台 + 文件）
 │   ├── file_utils.py          # JSON 读写（原子写）+ 缓存单例
 │   ├── retry.py               # 泛型重试函数（指数退避）
 │   └── convert.py             # 弹性类型转换（宽容解析）
+├── .archived/                 # 退役归档（ui-0.2.8 旧栈 + PySide6 探针，gitignore 不入库）
 ├── .reference/                # 参考仓库与硬件资料（外部 clone，不纳入版本控制）
-├── tools/rubberband/          # 内置变速引擎（GPL 便携构建，兜底方案，随仓库分发）
 ├── z.plan.md                  # 项目规划与里程碑（含全量代码审计报告附录）
 ├── w.study.md                 # 源码研读报告（含 B13 FLX4 学习报告）
 ├── x.progress.md              # 任务清单（D/E/F/G/H/I 系列）

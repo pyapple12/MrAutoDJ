@@ -1,6 +1,4 @@
-# MrAutoDJ 依赖（M1 起步草案，按 z.plan.md 技术栈逐步启用）
-# GUI
-PySide6>=6.6.0
+# MrAutoDJ 依赖（PL007 迁移收口后：Python 侧仅音频引擎 + WS 网关；前端在 webui/，壳在 shell/）
 # 音频输出（低延迟实时回调；PyPI 包名为 sounddevice，python-sounddevice 为 conda 名）
 sounddevice>=0.5.0
 # 音频数组

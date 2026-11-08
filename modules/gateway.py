@@ -433,6 +433,17 @@ class Gateway:
         self._server = await websockets.serve(self._client_loop, host, port)
         actual = int(self._server.sockets[0].getsockname()[1])
         self._tick_task = asyncio.create_task(self._tick_loop())
+
+        def _tick_crash(task: asyncio.Task) -> None:
+            # tick 任务异常不留死角：崩溃记 ERROR 日志（推流是装饰层，主业务 RPC
+            # 不受影响——事件循环存活；不做自动重启，属韧性后置池）
+            if task.cancelled():
+                return
+            exc = task.exception()
+            if exc is not None:
+                _logger.exception("tick loop 任务崩溃（推流停止，RPC 不受影响）", exc_info=exc)
+
+        self._tick_task.add_done_callback(_tick_crash)
         _logger.info("gateway 就绪 %s:%s tick=%sHz", host, actual, self.tick_hz)
         return actual
 
@@ -621,6 +632,23 @@ class Gateway:
         if hasattr(state, "value"):
             state = state.value
         slots = self.slot_count
+
+        def _flag(obj, name: str) -> bool:
+            # 灯态读取：property/方法双兼容（真引擎为 property，假件为方法——
+            # PL007 教训：鸭子对齐必须覆盖两种形态，否则真引擎路径首帧即崩）
+            v = getattr(obj, name, None)
+            if v is None:
+                return False
+            try:
+                return bool(v() if callable(v) else v)
+            except Exception:
+                return False
+
+        try:
+            hot = [bool(deck.hot_cue_state(i)["has"]) for i in range(slots)]
+            sampler = [bool(deck.sample_state(i)["loaded"]) for i in range(slots)]
+        except Exception:
+            hot, sampler = [False] * slots, [False] * slots
         return {
             "state": str(state),
             "paused": bool(getattr(deck, "paused", True)),
@@ -631,15 +659,11 @@ class Gateway:
             "vu": round(float(vu), 3),
             "tempo_rate": float(getattr(deck, "tempo_rate", 1.0)),
             "key_shift": int(getattr(deck, "key_shift", 0)),
-            "keylock": bool(getattr(deck, "_keylock_on", False)),
-            "loop": bool(deck.loop_active()) if hasattr(deck, "loop_active") else False,
-            "slip": bool(deck.slip_active()) if hasattr(deck, "slip_active") else False,
-            "hot_cues": [
-                bool(deck.hot_cue_state(i)["has"]) for i in range(slots)
-            ],
-            "sampler_loaded": [
-                bool(deck.sample_state(i)["loaded"]) for i in range(slots)
-            ],
+            "keylock": _flag(deck, "keylock") or bool(getattr(deck, "_keylock_on", False)),
+            "loop": _flag(deck, "loop_active") or _flag(deck, "loop"),
+            "slip": _flag(deck, "slip_active") or _flag(deck, "slip_on"),
+            "hot_cues": hot,
+            "sampler_loaded": sampler,
         }
 
     # --- 指令实现（v1 路由 8 条） ---
@@ -1306,9 +1330,10 @@ class Gateway:
         now_deck = getattr(self.engine, f"deck_{self._target}")
         target = self._target
 
-        def on_done(err: Exception | None = None) -> None:
-            # 闭包捕获 target/entry（prepare_next 返回后迟绑定生效）
-            self._on_prepared(target, entry, err)  # noqa: F821
+        def on_done(plan, error) -> None:
+            # tm.prepare 回调约定 on_done(plan, error)（成功 plan 非 None）；
+            # entry 迟绑定闭包（prepare_next 返回后生效）
+            self._on_prepared(target, entry, plan, error)  # noqa: F821
 
         entry = automix.prepare_next(now_deck, on_done=on_done)
         if entry is None:
@@ -1316,15 +1341,16 @@ class Gateway:
         self._pending_prepare[target] = entry
         return {"entry": {"path": entry["path"], "name": entry.get("name", "")}}
 
-    def _on_prepared(self, target: str, entry: dict | None, err: Exception | None = None) -> None:
-        # 烘焙完成回调（tm 工作线程）：prepared 事件帧跨线程投递（成功/失败中文化）
+    def _on_prepared(self, target: str, entry: dict | None, plan, error) -> None:
+        # 烘焙完成回调（tm 工作线程，约定 on_done(plan, error)）：prepared 事件帧
+        # 跨线程投递（成功/失败中文化）
         frame = {
             "type": "prepared",
             "deck": target,
-            "ok": err is None,
+            "ok": error is None and plan is not None,
             "path": (entry or {}).get("path", ""),
             "name": (entry or {}).get("name", ""),
-            "error": "" if err is None else f"烘焙失败: {err}",
+            "error": "" if error is None else f"烘焙失败: {error}",
         }
         self._loop.call_soon_threadsafe(self._broadcast_json, frame)
 

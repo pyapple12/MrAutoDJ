@@ -909,7 +909,7 @@ _mix_source_chunk 推进-消费恒等零漂移（同式同 frames）；beat_fram
 
 > 背景：PySide6 拟物化受限于前端表现力（三轮 UI 评审 7.4 封顶），用户定案迁移至 Tauri 2 + Web（Vue3+TS+Vite）+ Python sidecar；**引擎资产（modules/ 五轮审计代码）100% 保留**，仅替换 UI 层与进程壳。
 > 边界（用户定案）：5 个 PL 完成即**迁移完成**（Web 全功能 + 旧栈退役 + 工程门禁切换）；性能优化/深度测试/韧性/打包发布全部后置为迁移后阶段，不占本五案。
-> 状态：PL003/PL004 完成（V0.2.8.0/V0.2.8.1——sidecar 骨架与协议 v1.1、双盘控制面全量对齐 36 条指令；webui 控制面四区全量渲染）；PL005-007 依次排期（005 曲库数据层 → 006 拟物视觉 → 007 退役收口）。
+> 状态：PL003-007 全部完成（V0.2.8.0-V0.2.9.0——**UI 架构迁移五案收官**：sidecar/控制面 38 指令/数据层/拟物视觉 8.6 分/PySide6 退役与工程体系切换；签收清单见附录·六）。
 
 ### 〇、总体架构与贯穿决策
 
@@ -989,6 +989,23 @@ Tauri 2 壳（Rust 零业务：窗口/文件对话框/sidecar 进程管理）
 - 验证：退役后全量回归 + `git grep PySide6` 仅剩 archived//文档历史 + tauri dev 冷启动全流程
 - 退出标准：对照清单签收；PySide6 出 requirements；AGENTS/README/z.plan 反映新栈
 
-### 六、迁移后阶段池（不占本五案，届时按需立项）
+### 六、PL007.1 双栈对照签收清单（2026-11-08 归档——退役前置闸门）
+
+**自动化协议级签收（probe_pl007_gate 19/19 PASS，真引擎端到端）**：
+
+| 清单项（对照 PL004/PL005 功能域） | 签收断言 | 结果 |
+| --- | --- | --- |
+| 曲库扫描 + 缓存/分析（G2-G4） | 3 条目扫描→逐曲分析事件帧→analysis_done 3/3→BPM 就绪 | PASS |
+| 传输链（G5-G6） | load 曲库补全 BPM/下拍 → play 真机出声 | PASS |
+| 耳机预听（G7-G8） | phones_preview 独占激活/再点停止 | PASS |
+| AUTO 接歌链（G9-G14） | 开关→recommend 评分（三曲库候选）→prepare 受理→prepared 烘焙事件→mix 触发→mix_started meta 滚动+链式装填 song_c | PASS |
+| 表演系（G15-G17） | Keylock / TEMPO 倍率 / 4 拍循环 | PASS |
+| 进程纪律（G19） | sidecar 全程存活无崩溃 | PASS |
+
+**live 听感签收（人工项，历史复核授权闭环）**：转场 EQ 渐变/Keylock 变速不变调/双输出监听——日常听感不做复核（用户 2026-11-07 定案），与 PySide6 版听感同源（引擎零改动保证——modules/ 五案零行为变更，仅 gateway 只读桥接）。
+
+**遗留声明**：PL006 taste-skill 评审 overall ≈8.6（≥8.0 退出线）；PySide6 探针 28 个归档 `.archived/probes/`（断言承接映射见 AGENTS 门禁节）。
+
+### 七、迁移后阶段池（不占本五案，届时按需立项）
 
 性能调优（指令往返/波形压缩/60Hz 流）｜深度测试（组件/协议矩阵/故障注入）｜韧性（心跳/自动重启/重连 UI 完整化）｜打包发布（PyInstaller sidecar + Tauri bundler + 安装包）｜视觉精修迭代
